@@ -77,6 +77,18 @@ the vault stores calendar dates, so put that detail in `--notes` if it matters.
 | `muche dao`, `delete koro` | `rm <id> --force` |
 | `abar cholu koro`, `reopen` | `reopen <id>` |
 
+### The shape of a finished task
+
+Every task gets all of these. Both omissions below have been called out:
+
+- `--project` — this is what draws the coloured chip *and* highlights the
+  project's name inside the title. Leaving it off makes the task look orphaned.
+  If the project name isn't already in the title, put it there.
+- `--tag` — `design`, `frontend`, `architecture`, and so on.
+- `--notes` — the real context, in his register. `"OERP module."` is not a note;
+  it says nothing the project chip doesn't already say.
+- `--raw` — his exact words.
+
 ### Judgement calls
 
 - **Several tasks in one sentence → several `add` calls.** "invoice pathate hobe
@@ -103,8 +115,8 @@ counts on its own; your job is the prose above them.
 node bin/todo.mjs digest --write "…markdown…"
 ```
 
-Write it **in his register** — Banglish/Bangla mixed with English technical
-terms, exactly how he talks. Keep it short: 3–6 lines. Lead with what matters
+Write it **in his register** — see *Writing Bengali to him* in §7; the idiom
+rule matters here most of all. Keep it short: 3–6 lines. Lead with what matters
 today, name the single most important task, flag anything rotting.
 
 Supported markdown: paragraphs, `- bullets`, `**bold**`, `` `code` ``. Nothing
@@ -237,6 +249,23 @@ every installed copy** — there is no recovery, only a manual reinstall.
 
 - Task titles: English, imperative, specific. "Send the invoice to the client",
   not "invoice".
-- Talking to Shawon: match his Banglish register. Technical terms stay English.
 - Don't ask permission to add a task he clearly just asked for. Add it, then
   confirm what you did in one line.
+
+### Writing Bengali to him
+
+Bengali prose, English technical terms (CMS, upload, storage, commit,
+backdrop-filter). That much is easy. The part that goes wrong is **idiom**.
+
+Write the sentence as it is *said* in Bengali. Do not translate an English
+figure of speech word-for-word — it parses, but no Bengali speaker says it, and
+it reads as machine output rather than as someone talking.
+
+| Wrong (translated) | What was meant | Say instead |
+|---|---|---|
+| রঙ ধুয়ে দিচ্ছে | "washing out the colour" | রঙ ফ্যাকাশে হয়ে যাচ্ছে |
+| border টা চেঁচাচ্ছে | "the border shouts" | border টা বড্ড বেশি চোখে লাগছে |
+| কাদা রঙ | "muddy" | ঘোলাটে |
+
+Test: if a phrase only makes sense once you mentally translate it back to
+English, rewrite it. This applies to the digest as much as to conversation.

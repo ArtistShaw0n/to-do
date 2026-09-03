@@ -66,6 +66,10 @@ the vault stores calendar dates, so put that detail in `--notes` if it matters.
 | (nothing said) | `--p 2` — the default |
 | `pore holeo hobe`, `whenever`, `low priority` | `--p 3` |
 
+Priority is stored and shown by `list`, but **the desktop app does not display
+it** — Shawon had it removed, keeping the window to a plain list. Set it anyway;
+just don't tell him it will be visible.
+
 ### Status words
 
 | He says | Command |

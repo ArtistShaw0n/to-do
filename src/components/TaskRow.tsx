@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Priority, Project, Task, Vault } from '../lib/types';
+import type { Project, Task, Vault } from '../lib/types';
 import { isOverdue, relativeDue } from '../lib/dates';
 import { projectColor } from '../lib/vault';
 
@@ -46,15 +46,6 @@ function highlightProjects(title: string, projects: Project[]): ReactNode[] {
   if (cursor < title.length) out.push(title.slice(cursor));
   return out;
 }
-
-const PRIORITY_COLOR: Record<Priority, string> = {
-  0: 'var(--pink)',
-  1: 'var(--orange)',
-  2: 'var(--text-3)',
-  3: 'var(--text-3)',
-};
-
-const PRIORITIES: Priority[] = [0, 1, 2, 3];
 
 interface Props {
   task: Task;
@@ -125,11 +116,6 @@ export function TaskRow({ task, vault, editing, onToggle, onOpen, onClose, onPat
 
           {/* The right-hand column: what you need at a glance, right-aligned. */}
           <span className="task-side">
-            {task.priority <= 1 && !done && (
-              <span className="task-flag" style={{ color: PRIORITY_COLOR[task.priority] }}>
-                {task.priority === 0 ? 'Urgent' : 'High'}
-              </span>
-            )}
             {due && !done && (
               <span className="task-due" data-late={late}>
                 {due}
@@ -180,7 +166,6 @@ function TaskEditor({
   const [project, setProject] = useState(task.project ?? '');
   const [tags, setTags] = useState(task.tags.join(', '));
   const [due, setDue] = useState(task.due ?? '');
-  const [priority, setPriority] = useState<Priority>(task.priority);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const titleRef = useRef<HTMLTextAreaElement>(null);
@@ -204,7 +189,8 @@ function TaskEditor({
       project: project.trim() || undefined,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       due: due || undefined,
-      priority,
+      // priority is deliberately not touched here — the app no longer shows or
+      // edits it; the field still exists and the CLI still sets it.
     });
     onClose();
   };
@@ -269,22 +255,6 @@ function TaskEditor({
             />
           </label>
 
-          <div className="edit-field edit-field-wide">
-            <span>Priority</span>
-            <div className="seg">
-              {PRIORITIES.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  aria-pressed={priority === p}
-                  style={{ '--seg-fg': PRIORITY_COLOR[p] } as React.CSSProperties}
-                  onClick={() => setPriority(p)}
-                >
-                  P{p}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
 
         <div className="edit-actions">

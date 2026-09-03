@@ -1,20 +1,20 @@
 import { useRef, useState } from 'react';
-import type { Priority, Task } from '../lib/types';
+import type { Task } from '../lib/types';
 import { parseDateInput } from '../lib/dates';
 
 /**
  * Quick-add.
  *
- * The single line parses `#project`, `@tag`, `!0`–`!3` and a trailing date word
- * — everything the card displays. Notes need a second line, so the box expands
- * to a notes field rather than trying to cram prose into the same input.
+ * The single line parses `#project`, `@tag` and a trailing date word — every
+ * attribute the card displays. Priority is not among them: the app deliberately
+ * doesn't show it, so parsing "!1" would silently eat text nothing explains.
+ * Notes need a second line, so the box expands rather than cramming prose in.
  */
 export function parseQuickAdd(input: string): (Partial<Task> & { title: string }) | null {
   let text = ` ${input.trim()} `;
   if (!text.trim()) return null;
 
   let project: string | undefined;
-  let priority: Priority | undefined;
   const tags: string[] = [];
 
   // Require a leading letter so "Fix issue #42" keeps its number.
@@ -26,11 +26,6 @@ export function parseQuickAdd(input: string): (Partial<Task> & { title: string }
     tags.push(name);
     return ' ';
   });
-  text = text.replace(/\s!([0-3])\b/g, (_, n: string) => {
-    priority = Number(n) as Priority;
-    return ' ';
-  });
-
   const words = text.trim().split(/\s+/).filter(Boolean);
   let due: string | undefined;
   for (let take = Math.min(2, words.length); take >= 1; take -= 1) {
@@ -51,7 +46,6 @@ export function parseQuickAdd(input: string): (Partial<Task> & { title: string }
     title,
     ...(project ? { project } : {}),
     ...(tags.length ? { tags } : {}),
-    ...(priority !== undefined ? { priority } : {}),
     ...(due ? { due } : {}),
     source: 'app' as const,
   };
@@ -100,7 +94,7 @@ export function Composer({ projects, onAdd }: Props) {
   };
 
   const shortest = [...projects].sort((a, b) => a.length - b.length)[0];
-  const hint = shortest ? `Add a task…   #${shortest}  @tag  !1  tomorrow` : 'Add a task…   @tag  !1  tomorrow';
+  const hint = shortest ? `Add a task…   #${shortest}  @tag  tomorrow` : 'Add a task…   @tag  tomorrow';
 
   return (
     <div className="composer">

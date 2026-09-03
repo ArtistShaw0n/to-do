@@ -126,11 +126,9 @@ export function TaskRow({ task, vault, editing, onToggle, onOpen, onClose, onPat
           {/* The right-hand column: what you need at a glance, right-aligned. */}
           <span className="task-side">
             {task.priority <= 1 && !done && (
-              <span
-                className="prio-dot"
-                style={{ background: PRIORITY_COLOR[task.priority] }}
-                title={task.priority === 0 ? 'Urgent' : 'High'}
-              />
+              <span className="task-flag" style={{ color: PRIORITY_COLOR[task.priority] }}>
+                {task.priority === 0 ? 'Urgent' : 'High'}
+              </span>
             )}
             {due && !done && (
               <span className="task-due" data-late={late}>

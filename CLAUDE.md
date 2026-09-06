@@ -90,12 +90,31 @@ Every task gets all of these. Both omissions below have been called out:
   If the project name isn't already in the title, put it there.
 - `--tag` — two kinds, and the app tells them apart:
   - **Kind** tags say what the work *is*: `bug`, `release`, `design`, `frontend`,
-    `backend`, `architecture`, `requirements`, `billing`, `docs`, `test`.
-  - **Any other tag is read as the module** (`email`, `hris`, `project-hub`).
-    That is the whole convention — a bug needs `bug` + its module and it files
-    itself under the right heading in the app's Bugs view.
-  - The list lives in `KIND_TAGS` in `src/lib/vault.ts`. Adding a new kind of
-    work means adding it there, or it will be mistaken for a module.
+    `backend`, `responsive`, `architecture`, `requirements`, `billing`, `docs`,
+    `test`. The list lives in `KIND_TAGS` in `src/lib/vault.ts` — a new kind of
+    work must be added there, or it will be mistaken for a module.
+  - **Any other tag is read as the module.** That is the whole convention: a bug
+    needs `bug` + its module and it files itself under the right heading in the
+    app's Bugs view.
+
+  OERP is the *project*; every module lives under it. Use these spellings, or one
+  module will split into two headings:
+
+  | Module | Tag |
+  |---|---|
+  | Email | `email` |
+  | Project Hub | `project-hub` |
+  | HRIS | `hris` |
+  | Meet & Chat | `meet-chat` |
+  | Team Evaluation | `team-evaluation` |
+  | Shared UI | `shared-ui` |
+  | Property Booking System | `property-booking` |
+  | Notification (cuts across modules) | `notification` |
+
+  Work belonging to the whole project rather than one module — the repo
+  restructure, the design system, permissions, handover to testing — carries no
+  module tag, which is correct.
+
 - `--notes` — the real context, in his register. `"OERP module."` is not a note;
   it says nothing the project chip doesn't already say.
 - `--raw` — his exact words.

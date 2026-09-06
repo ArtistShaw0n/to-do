@@ -280,6 +280,54 @@ export function sortTasks(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => b.order - a.order);
 }
 
+/**
+ * Tags that say what *kind* of work a task is. Any other tag on a task is
+ * treated as the module it belongs to — that is the whole convention, so a bug
+ * only needs `bug` plus its module (`email`, `hris`, …) to file itself.
+ */
+export const KIND_TAGS = new Set([
+  'bug', 'release', 'design', 'frontend', 'backend',
+  'architecture', 'requirements', 'billing', 'docs', 'test',
+]);
+
+export function moduleOf(task: Task): string | undefined {
+  return task.tags.find((t) => !KIND_TAGS.has(t.toLowerCase()));
+}
+
+export interface BugGroup {
+  module: string;
+  /** The umbrella "ship a release" task for this module, when one exists. */
+  release?: Task;
+  bugs: Task[];
+}
+
+/**
+ * Bugs grouped by the module they were found in, heaviest group first, with
+ * each module's release task attached so it is clear what the fixes are
+ * heading into.
+ */
+export function groupBugsByModule(vault: Vault, done = false): BugGroup[] {
+  const releases = vault.tasks.filter((t) => t.tags.includes('release'));
+  const bugs = vault.tasks.filter(
+    (t) => t.tags.includes('bug') && (done ? !isOpen(t) : isOpen(t)),
+  );
+
+  const byModule = new Map<string, Task[]>();
+  for (const bug of bugs) {
+    const key = moduleOf(bug) ?? 'unfiled';
+    if (!byModule.has(key)) byModule.set(key, []);
+    byModule.get(key)!.push(bug);
+  }
+
+  return [...byModule]
+    .map(([module, list]) => ({
+      module,
+      release: releases.find((r) => moduleOf(r) === module),
+      bugs: sortTasks(list),
+    }))
+    .sort((a, b) => b.bugs.length - a.bugs.length || a.module.localeCompare(b.module));
+}
+
 export function projectColor(vault: Vault, name?: string): string {
   if (!name) return 'var(--tint)';
   return vault.projects.find((p) => p.name === name)?.color ?? 'var(--tint)';

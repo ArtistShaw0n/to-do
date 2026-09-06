@@ -53,10 +53,12 @@ export function parseQuickAdd(input: string): (Partial<Task> & { title: string }
 
 interface Props {
   projects: string[];
+  /** Tags every task added from the current view should carry (e.g. `bug`). */
+  forceTags?: string[];
   onAdd: (draft: Partial<Task> & { title: string }) => void;
 }
 
-export function Composer({ projects, onAdd }: Props) {
+export function Composer({ projects, forceTags, onAdd }: Props) {
   const [value, setValue] = useState('');
   const [notes, setNotes] = useState('');
   const [tags, setTags] = useState('');
@@ -68,12 +70,14 @@ export function Composer({ projects, onAdd }: Props) {
     const draft = parseQuickAdd(value);
     if (!draft) return;
 
-    // Typed-in fields win over anything parsed out of the one-liner.
+    // Typed-in fields win over anything parsed out of the one-liner, and the
+    // view's own tags are always folded in.
     const typedTags = tags.split(',').map((t) => t.trim()).filter(Boolean);
+    const allTags = [...new Set([...(draft.tags ?? []), ...typedTags, ...(forceTags ?? [])])];
     onAdd({
       ...draft,
       ...(notes.trim() ? { notes: notes.trim() } : {}),
-      ...(typedTags.length ? { tags: [...new Set([...(draft.tags ?? []), ...typedTags])] } : {}),
+      ...(allTags.length ? { tags: allTags } : {}),
       ...(project.trim() ? { project: project.trim() } : {}),
     });
 
@@ -94,7 +98,10 @@ export function Composer({ projects, onAdd }: Props) {
   };
 
   const shortest = [...projects].sort((a, b) => a.length - b.length)[0];
-  const hint = shortest ? `Add a task…   #${shortest}  @tag  tomorrow` : 'Add a task…   @tag  tomorrow';
+  const noun = forceTags?.includes('bug') ? 'a bug' : 'a task';
+  const hint = shortest
+    ? `Add ${noun}…   #${shortest}  @module  tomorrow`
+    : `Add ${noun}…   @module  tomorrow`;
 
   return (
     <div className="composer">

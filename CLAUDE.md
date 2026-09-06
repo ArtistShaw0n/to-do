@@ -88,10 +88,35 @@ Every task gets all of these. Both omissions below have been called out:
 - `--project` — this is what draws the coloured chip *and* highlights the
   project's name inside the title. Leaving it off makes the task look orphaned.
   If the project name isn't already in the title, put it there.
-- `--tag` — `design`, `frontend`, `architecture`, and so on.
+- `--tag` — two kinds, and the app tells them apart:
+  - **Kind** tags say what the work *is*: `bug`, `release`, `design`, `frontend`,
+    `backend`, `architecture`, `requirements`, `billing`, `docs`, `test`.
+  - **Any other tag is read as the module** (`email`, `hris`, `project-hub`).
+    That is the whole convention — a bug needs `bug` + its module and it files
+    itself under the right heading in the app's Bugs view.
+  - The list lives in `KIND_TAGS` in `src/lib/vault.ts`. Adding a new kind of
+    work means adding it there, or it will be mistaken for a module.
 - `--notes` — the real context, in his register. `"OERP module."` is not a note;
   it says nothing the project chip doesn't already say.
 - `--raw` — his exact words.
+
+### Bugs and releases
+
+A live module's bugs are tracked here, one task each:
+
+```bash
+node bin/todo.mjs add "Show a preview popup before download in the OERP email Drive" \
+  --project OERP --tag bug,email,frontend --notes "…" --raw "…"
+```
+
+Each module also gets one umbrella task tagged `release` + its module —
+"Fix the reported OERP email module bugs and ship a new release". The app's
+**Bugs** view groups every bug by module and shows that release line underneath
+the heading, so it is clear what the fixes are going into.
+
+Reproduce steps and screenshots belong in the GitLab issue, next to the fix
+commit; put the issue link in `--notes`. The task here is the one line saying
+what has to change.
 
 ### Judgement calls
 

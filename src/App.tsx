@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { longDate } from './lib/dates';
-import { addTask, deleteTask, isOpen, sortTasks, toggleDone, updateTask } from './lib/vault';
+import {
+  addTask, deleteTask, groupBugsByModule, isOpen, sortTasks, toggleDone, updateTask,
+} from './lib/vault';
 import { useVault } from './lib/useVault';
 import { TaskRow } from './components/TaskRow';
 import { Composer } from './components/Composer';
@@ -11,8 +13,11 @@ const RECENT_DONE = 50;
 type ThemeMode = 'system' | 'light' | 'dark';
 const THEME_ORDER: ThemeMode[] = ['system', 'light', 'dark'];
 
+type View = 'all' | 'bugs';
+
 export default function App() {
   const { vault, error, mutate } = useVault();
+  const [view, setView] = useState<View>('all');
   const [showDone, setShowDone] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [update, setUpdate] = useState<{ version: string; install: () => Promise<void> } | null>(null);
@@ -67,17 +72,21 @@ export default function App() {
   }, []);
 
   const open = useMemo(() => (vault ? sortTasks(vault.tasks.filter(isOpen)) : []), [vault]);
-
-  const done = useMemo(
-    () =>
-      vault
-        ? vault.tasks
-            .filter((t) => !isOpen(t))
-            .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
-            .slice(0, RECENT_DONE)
-        : [],
-    [vault],
+  const bugGroups = useMemo(() => (vault ? groupBugsByModule(vault) : []), [vault]);
+  const openBugCount = useMemo(
+    () => bugGroups.reduce((n, g) => n + g.bugs.length, 0),
+    [bugGroups],
   );
+
+  const done = useMemo(() => {
+    if (!vault) return [];
+    const finished = vault.tasks
+      .filter((t) => !isOpen(t))
+      .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''));
+    // The Completed section belongs to whichever view you're in.
+    return (view === 'bugs' ? finished.filter((t) => t.tags.includes('bug')) : finished)
+      .slice(0, RECENT_DONE);
+  }, [vault, view]);
 
   if (error && !vault) {
     return (
@@ -117,48 +126,111 @@ export default function App() {
       <main className="sheet">
         <header className="sheet-head">
           <div>
-            <h1 className="sheet-title">Tasks</h1>
+            <h1 className="sheet-title">{view === 'bugs' ? 'Bugs' : 'Tasks'}</h1>
             <p className="sheet-date">{longDate()}</p>
           </div>
 
-          <button
-            className="theme-btn"
-            title={`Appearance: ${themeLabel}`}
-            aria-label={`Appearance: ${themeLabel}. Click to change.`}
-            onClick={() => setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length])}
-          >
-            {theme === 'light' ? (
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="8" r="3.1" />
-                <path d="M8 1.4v1.5M8 13.1v1.5M1.4 8h1.5M13.1 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1" />
-              </svg>
-            ) : theme === 'dark' ? (
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M13.2 9.6A5.8 5.8 0 016.4 2.8a5.9 5.9 0 106.8 6.8z" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <circle cx="8" cy="8" r="6.1" />
-                <path d="M8 1.9a6.1 6.1 0 000 12.2z" fill="currentColor" stroke="none" />
-              </svg>
-            )}
-            <span>{themeLabel}</span>
-          </button>
+          <div className="head-controls">
+            <div className="view-seg" role="tablist">
+              <button
+                role="tab"
+                aria-selected={view === 'all'}
+                onClick={() => {
+                  setView('all');
+                  setEditingId(null);
+                }}
+              >
+                All
+              </button>
+              <button
+                role="tab"
+                aria-selected={view === 'bugs'}
+                onClick={() => {
+                  setView('bugs');
+                  setEditingId(null);
+                }}
+              >
+                Bugs
+                {openBugCount > 0 && <span className="seg-count">{openBugCount}</span>}
+              </button>
+            </div>
+
+            <button
+              className="theme-btn"
+              title={`Appearance: ${themeLabel}`}
+              aria-label={`Appearance: ${themeLabel}. Click to change.`}
+              onClick={() => setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length])}
+            >
+              {theme === 'light' ? (
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <circle cx="8" cy="8" r="3.1" />
+                  <path d="M8 1.4v1.5M8 13.1v1.5M1.4 8h1.5M13.1 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1" />
+                </svg>
+              ) : theme === 'dark' ? (
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M13.2 9.6A5.8 5.8 0 016.4 2.8a5.9 5.9 0 106.8 6.8z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6.1" />
+                  <path d="M8 1.9a6.1 6.1 0 000 12.2z" fill="currentColor" stroke="none" />
+                </svg>
+              )}
+            </button>
+          </div>
         </header>
 
         <div className="sheet-scroll" onClick={() => setEditingId(null)}>
-          {open.length === 0 ? (
+          {view === 'all' ? (
+            open.length === 0 ? (
+              <div className="empty">
+                <div className="empty-mark">✓</div>
+                <div className="empty-title">All clear</div>
+                <div>Add one below.</div>
+              </div>
+            ) : (
+              <div className="task-stack">
+                {open.map((task) => (
+                  <TaskRow key={task.id} task={task} {...rowProps(task.id)} />
+                ))}
+              </div>
+            )
+          ) : bugGroups.length === 0 ? (
             <div className="empty">
               <div className="empty-mark">✓</div>
-              <div className="empty-title">All clear</div>
-              <div>Add one below.</div>
+              <div className="empty-title">No open bugs</div>
+              <div>Tag a task `bug` plus its module to file one here.</div>
             </div>
           ) : (
-            <div className="task-stack">
-              {open.map((task) => (
-                <TaskRow key={task.id} task={task} {...rowProps(task.id)} />
-              ))}
-            </div>
+            bugGroups.map((group) => (
+              <section key={group.module} className="bug-group">
+                <div className="bug-group-head">
+                  <span className="bug-module">{group.module}</span>
+                  <span className="bug-count">
+                    {group.bugs.length} {group.bugs.length === 1 ? 'bug' : 'bugs'}
+                  </span>
+                </div>
+
+                {/* What these fixes are heading into. */}
+                {group.release && (
+                  <button
+                    className="bug-release"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingId(group.release!.id);
+                    }}
+                  >
+                    ↳ {group.release.title}
+                  </button>
+                )}
+
+                <div className="task-stack">
+                  {group.bugs.map((task) => (
+                    <TaskRow key={task.id} task={task} {...rowProps(task.id)} />
+                  ))}
+                </div>
+              </section>
+            ))
           )}
 
           {done.length > 0 && (
@@ -172,7 +244,7 @@ export default function App() {
                 }}
               >
                 <span className="done-caret">▶</span>
-                Completed
+                {view === 'bugs' ? 'Fixed' : 'Completed'}
                 <span className="done-count">{done.length}</span>
               </button>
 
@@ -189,6 +261,9 @@ export default function App() {
 
         <Composer
           projects={vault.projects.map((p) => p.name)}
+          // Anything added from the Bugs view is a bug; the placeholder says so
+          // rather than tagging silently.
+          forceTags={view === 'bugs' ? ['bug'] : undefined}
           onAdd={(draft) => void mutate((v) => addTask(v, draft))}
         />
       </main>

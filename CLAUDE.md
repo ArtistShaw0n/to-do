@@ -284,16 +284,37 @@ Claude Code ──▶ bin/todo.mjs ──▶ data/tasks.json ◀── Rust fs-w
 The app auto-updates from GitHub Releases, verified against a minisign key.
 
 ```bash
-pnpm version patch          # or minor / major — also bump src-tauri/tauri.conf.json
-git commit -am "…" && git tag v0.1.1 && git push --follow-tags
+pnpm version patch --no-git-tag-version    # or minor / major
+# then set the same version in src-tauri/tauri.conf.json and src-tauri/Cargo.toml
+(cd src-tauri && cargo build --release)    # refreshes Cargo.lock
+
+git commit -am "Release v0.18.1"
+git tag -a v0.18.1 -m "Release v0.18.1"    # annotated, see below
+git push && git push origin v0.18.1
 ```
+
+`--no-git-tag-version` is deliberate: plain `pnpm version` commits and tags on
+the spot, before the other two version numbers have been changed.
+
+**Tag with `-a`.** `git push --follow-tags` pushes *annotated* tags only — it
+skips a plain `git tag v…` without a word of complaint, so the push succeeds,
+no workflow runs, and nothing looks wrong until you go hunting for the release.
+Pushing the tag by name avoids the trap entirely.
 
 The tag push triggers `.github/workflows/release.yml`, which builds a universal
 binary, signs it, and publishes `latest.json`. Running apps notice within a day
 and show an update toast.
 
-**The version in `package.json`, `src-tauri/tauri.conf.json` and the git tag
-must match**, or the updater will not offer the release.
+**The version in `package.json`, `src-tauri/tauri.conf.json`,
+`src-tauri/Cargo.toml` and the git tag must all match**, or the updater will not
+offer the release.
+
+Confirm it actually shipped rather than assuming:
+
+```bash
+gh run list --workflow=release.yml --limit 1
+gh release view v0.18.1 --json assets --jq '.assets[].name'   # expect .dmg, .tar.gz, .sig, latest.json
+```
 
 The private signing key lives at `~/.tauri/todo.key` and in the repo secret
 `TAURI_SIGNING_PRIVATE_KEY`. **If it is lost, auto-update breaks permanently for

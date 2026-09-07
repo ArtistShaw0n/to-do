@@ -152,10 +152,17 @@ normalised on the spot, in two passes:
 
 1. `normaliseLocally` in `src/lib/normalise.ts` recognises the words — the time
    and priority tables above, existing project names, kind and module tags — and
-   the task appears immediately in Shawon's own wording.
+   the entry appears immediately in Shawon's own wording. `looksLikeSecret`
+   diverts a line that merely states a passcode (`tab er pass 5665`) into a Note
+   instead, so a secret never sits in a task title even briefly.
 2. The app then shells out to `claude -p` (the `normalise_task` command in
    `src-tauri/src/lib.rs`) with a condensed copy of the rules on this page, and
-   rewrites the task in place with a clean English title, project and notes.
+   `applyItems` folds the reply back in.
+
+The reply is a **list**, because one typed line is not always one entry. It can
+be two tasks — "invoice pathate hobe ar PR review korte hobe" — or a note rather
+than a task. `applyItems` reuses the placeholder when the first item is the same
+kind of thing and drops it otherwise, all in a single write.
 
 If the CLI is missing, logged out or slow, pass 1 stands and nothing is lost.
 

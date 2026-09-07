@@ -5,7 +5,11 @@ import {
   addNote, addTask, deleteNote, deleteTask, isOpen, newId, projectColor,
   searchNotes, sortNotes, sortTasks, toggleDone, updateNote, updateTask,
 } from './lib/vault';
-import { buildPrompt, normaliseLocally, parseResponse } from './lib/normalise';
+import {
+  applyItems, buildPrompt, looksLikeSecret, noteFields, noteLocally, normaliseLocally,
+  parseItems, taskFields,
+  type NoteDraft, type ViewContext,
+} from './lib/normalise';
 import { useVault } from './lib/useVault';
 import { NoteDetail, TaskDetail } from './components/DetailPane';
 import { CheckGlyph, NoteGlyph, ViewGlyph, type ViewGlyphName } from './components/glyphs';
@@ -124,65 +128,64 @@ export default function App() {
    * Anything typed in belongs to the category that is open.
    *
    * Two passes. The local one runs now and its result goes straight into the
-   * list, so the task is never held hostage to a subprocess. Claude then
-   * rewrites it in place — properly translated, with a project and notes. If
-   * Claude is missing, logged out or slow, what was typed simply stays.
+   * list, so what was typed is never held hostage to a subprocess. Claude then
+   * replaces it properly — translated, with a project and notes. If Claude is
+   * missing, logged out or slow, what was typed simply stays.
    */
   const add = (raw: string) => {
     const text = raw.trim();
     if (!text) return;
 
-    if (view === 'notes') {
-      void mutate((v) => addNote(v, { title: text }));
+    const id = newId();
+
+    // A line that states a passcode is reference material, not work. Catching
+    // that here rather than leaving it to Claude keeps the value out of a task
+    // title for the fifteen seconds the model takes to answer.
+    if (view === 'notes' || looksLikeSecret(text)) {
+      const note: NoteDraft = looksLikeSecret(text)
+        ? noteLocally(text)
+        : { type: 'note', kind: 'other', title: text, body: '' };
+      void mutate((v) => addNote(v, { id, ...noteFields(note) }));
+      void enrich(id, text, 'note', {});
       return;
     }
 
-    const local = normaliseLocally(text, vault);
-    const id = newId();
-
     // The open category is context in its own right: typing under Bugs means
     // this is a bug, even when the words never say so.
+    const local = normaliseLocally(text, vault);
     const fromView = {
       ...(view === 'personal' && !local.project ? { project: PERSONAL } : {}),
       ...(view === 'bugs' && !local.tags.includes('bug')
         ? { tags: [...local.tags, 'bug'] } : {}),
     };
 
-    void mutate((v) => addTask(v, { id, ...local, ...fromView }));
-    void enrich(id, text, local, fromView);
+    void mutate((v) => addTask(v, { id, ...taskFields(local), ...fromView }));
+    void enrich(id, text, 'task', fromView);
   };
 
-  /** Hand the raw text to Claude Code and fold the better version back in. */
+  /**
+   * Hand the raw text to Claude Code and fold the better version back in.
+   *
+   * One typed line is not always one entry: it can be two tasks, or a note
+   * rather than a task. So the placeholder is reused only when the first item
+   * comes back as the same kind of thing, and is otherwise dropped in favour of
+   * what Claude actually found. Everything lands in one write.
+   */
   const enrich = async (
     id: string,
     raw: string,
-    local: ReturnType<typeof normaliseLocally>,
-    fromView: { project?: string; tags?: string[] },
+    placeholder: 'task' | 'note',
+    fromView: ViewContext,
   ) => {
     setBusy((b) => new Set(b).add(id));
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const text = await invoke<string>('normalise_task', { prompt: buildPrompt(raw, vault) });
-      const better = parseResponse(text, raw, local);
-
-      // The category the user typed under is a fact; a model guess does not
-      // get to overrule it.
-      const tags = fromView.tags
-        ? [...new Set([...better.tags, ...fromView.tags])]
-        : better.tags;
-
-      await mutate((v) => updateTask(v, id, {
-        title: better.title,
-        project: fromView.project ?? better.project,
-        tags,
-        notes: better.notes,
-        due: better.due,
-        priority: better.priority,
-        originalInput: raw,
-      }));
+      const items = parseItems(text, raw, normaliseLocally(raw, vault));
+      await mutate((v) => applyItems(v, id, placeholder, items, fromView));
     } catch {
       // No CLI, a lapsed login, offline, a reply that was not JSON — every one
-      // of these leaves a perfectly usable task behind, so none is worth
+      // of these leaves a perfectly usable entry behind, so none is worth
       // interrupting the user over.
     } finally {
       setBusy((b) => {

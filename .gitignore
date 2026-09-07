@@ -46,3 +46,6 @@ pnpm-debug.log*
 .dev.vars
 .wrangler/
 .test-out/
+
+# The hub key. Local only — never committed.
+.sync-key.local

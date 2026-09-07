@@ -1,9 +1,9 @@
-# The sync hub. See worker/index.ts.
+# Vault — the sync hub. See worker/index.ts.
 #
 # Deploying needs a (free) Cloudflare account; `wrangler dev` runs the whole
 # thing locally without one, which is how it is tested here.
 
-name = "todo-sync"
+name = "vault"
 main = "worker/index.ts"
 compatibility_date = "2026-09-01"
 

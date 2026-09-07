@@ -153,6 +153,34 @@ export async function openSession({ quiet = false } = {}) {
   }
 }
 
+/**
+ * Read the JSON file directly, ignoring any open hub session.
+ *
+ * Only `sync --push` needs this: everything else should see whatever the hub
+ * holds, which is the entire point of the hub.
+ */
+export function loadVaultFromFile() {
+  const file = vaultPath();
+  if (!existsSync(file)) return emptyVault();
+  try {
+    return migrate(JSON.parse(readFileSync(file, 'utf8')));
+  } catch {
+    return emptyVault();
+  }
+}
+
+/** Copy a vault into the open session's store. */
+export function pushToSession(vault) {
+  if (!session) throw new Error('not connected to a hub');
+  session.applyVaultToStore(session.store, vault);
+  session.dirty = true;
+}
+
+/** What the hub currently holds, for deciding whether a push is safe. */
+export function sessionVault() {
+  return session ? migrate(session.storeToVault(session.store)) : null;
+}
+
 export async function closeSession() {
   if (!session) return;
   const { synchronizer, socket, dirty } = session;

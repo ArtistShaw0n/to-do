@@ -16,6 +16,7 @@ import {
   PRIORITY_LABELS, STATUSES, computeStats, ensureProject, findTask,
   loadVault, newId, nowISO, parseDate, saveVault, todayISO, vaultPath, writeAppConfig,
   openSession, closeSession, readSyncConfig, writeSyncConfig, clearSyncConfig,
+  loadVaultFromFile, pushToSession, sessionVault,
 } from './vault.mjs';
 
 // Piping into `head`/`less` closes stdout early. Without this, Node raises an
@@ -682,8 +683,32 @@ commands.path = () => process.stdout.write(`${vaultPath()}\n`);
  * Without this the CLI works against the local file alone — right for one
  * machine, silently wrong for four.
  */
+/**
+ * Send this machine's JSON file up to the hub, once.
+ *
+ * Only needed when moving an existing vault onto a hub for the first time.
+ * Afterwards the hub is where everything lives and this would be meaningless.
+ */
+function pushLocalVault(flags) {
+  const onHub = sessionVault();
+  if (!onHub) die('not connected — run `todo sync <url> <key>` first');
+
+  const local = loadVaultFromFile();
+  if (!local.tasks.length && !local.notes.length) die('the local file is empty; nothing to push');
+
+  if (onHub.tasks.length && !flags.force) {
+    die(`the hub already holds ${onHub.tasks.length} task(s). `
+      + 'Pushing replaces them with this machine\'s file — pass --force if that is what you want.');
+  }
+
+  pushToSession(local);
+  console.log(`${green('OK')} pushed ${local.tasks.length} task(s) and ${local.notes.length} note(s) to the hub`);
+}
+
 commands.sync = (positional, flags) => {
   const [url, key] = positional;
+
+  if (flags.push) return pushLocalVault(flags);
 
   if (flags.off) {
     const target = clearSyncConfig();
@@ -776,6 +801,7 @@ ${bold('Utility')}
   init                 create vault + app config
   path                 print vault location
   sync [<url> <key>]   connect this machine to the sync hub, or show it
+  sync --push          send this machine's file up to the hub (first time only)
   sync --off           go back to the local file only
   export [--md]        dump everything
 
@@ -797,8 +823,11 @@ const { positional, flags } = parseArgs(rest);
 // and `help` in particular must work with no config and no connectivity.
 const OFFLINE_COMMANDS = new Set(['help', 'path', 'init', 'sync']);
 
+// …except `sync --push`, whose whole job is to talk to the hub.
+const needsHub = !OFFLINE_COMMANDS.has(command) || (command === 'sync' && flags.push);
+
 try {
-  if (!OFFLINE_COMMANDS.has(command)) await openSession();
+  if (needsHub) await openSession();
   commands[command](positional, flags);
   await closeSession();
 } catch (err) {

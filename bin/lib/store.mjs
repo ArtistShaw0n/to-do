@@ -2943,7 +2943,10 @@ function taskToRow(t) {
     completedAt: t.completedAt,
     order: t.order,
     source: t.source,
-    originalInput: t.originalInput
+    originalInput: t.originalInput,
+    needsNormalise: t.needsNormalise,
+    claimedBy: t.claimedBy,
+    claimedAt: t.claimedAt
   });
 }
 function noteToRow(n) {
@@ -3015,7 +3018,10 @@ function rowToTask(id2, row) {
     completedAt: str(row.completedAt),
     order: num(row.order) ?? 0,
     source,
-    originalInput: str(row.originalInput)
+    originalInput: str(row.originalInput),
+    needsNormalise: row.needsNormalise === true ? true : void 0,
+    claimedBy: str(row.claimedBy),
+    claimedAt: str(row.claimedAt)
   };
 }
 function rowToNote(id2, row) {

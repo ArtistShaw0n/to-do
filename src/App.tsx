@@ -167,8 +167,16 @@ export default function App() {
         ? { tags: [...local.tags, 'bug'] } : {}),
     };
 
-    void mutate((v) => addTask(v, { id, ...taskFields(local), ...fromView }));
-    void enrich(id, text, 'task', fromView);
+    // A device that cannot run Claude says so, and a Mac picks it up later.
+    // Without this a task typed on a phone would keep the wording it was typed
+    // in for good, while the same words typed on a Mac came out translated.
+    const canNormalise = '__TAURI_INTERNALS__' in window;
+
+    void mutate((v) => addTask(v, {
+      id, ...taskFields(local), ...fromView,
+      ...(canNormalise ? {} : { needsNormalise: true }),
+    }));
+    if (canNormalise) void enrich(id, text, 'task', fromView);
   };
 
   /**

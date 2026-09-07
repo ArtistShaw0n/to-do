@@ -39,6 +39,15 @@ export interface Task {
   source: 'claude' | 'app' | 'cli';
   /** The user's original Banglish phrasing, preserved next to the clean title. */
   originalInput?: string;
+
+  /**
+   * Typed on a device that cannot run Claude — a phone, or a Mac whose CLI is
+   * unreachable. A Mac picks these up and rewrites them properly.
+   */
+  needsNormalise?: boolean;
+  /** Which device took the job, so two Macs do not both run it. */
+  claimedBy?: string;
+  claimedAt?: string;
 }
 
 export interface Project {

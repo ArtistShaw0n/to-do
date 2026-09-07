@@ -91,6 +91,9 @@ export function taskToRow(t: Task): Record<string, string | number | boolean> {
     order: t.order,
     source: t.source,
     originalInput: t.originalInput,
+    needsNormalise: t.needsNormalise,
+    claimedBy: t.claimedBy,
+    claimedAt: t.claimedAt,
   });
 }
 
@@ -176,6 +179,9 @@ function rowToTask(id: string, row: Record<string, unknown>): Task {
     order: num(row.order) ?? 0,
     source,
     originalInput: str(row.originalInput),
+    needsNormalise: row.needsNormalise === true ? true : undefined,
+    claimedBy: str(row.claimedBy),
+    claimedAt: str(row.claimedAt),
   };
 }
 

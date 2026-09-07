@@ -5,6 +5,7 @@ import {
   applyVault, currentVault, migrateFromFile, onStoreChanged, readSyncConfig,
   seedSyncConfigFromHost, startLocalPersistence, startSync, type SyncState,
 } from './sync';
+import { startNormaliseWorker } from './normaliseWorker';
 
 interface UseVault {
   vault: Vault | null;
@@ -82,6 +83,7 @@ export function useVault(): UseVault {
   // One listener covers every source: this window, another device, the CLI.
   useEffect(() => onStoreChanged(() => { if (ready.current) refresh(); }), [refresh]);
 
+
   useEffect(() => {
     if (!vault) return;
     const stats = computeStats(vault);
@@ -104,6 +106,18 @@ export function useVault(): UseVault {
   const reload = useCallback(async () => {
     refresh();
   }, [refresh]);
+
+  /**
+   * Finish what the phones could not.
+   *
+   * Only on a Mac, and only once the hub is connected — there is nothing to
+   * pick up otherwise, and the CLI this leans on lives here.
+   */
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window) || sync !== 'online') return;
+    return startNormaliseWorker(mutate);
+  }, [sync, mutate]);
+
 
   return { vault, path: 'local store', error, sync, mutate, reload };
 }

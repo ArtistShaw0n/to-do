@@ -93,7 +93,7 @@ export function getStore(): MergeableStore {
   return store;
 }
 
-function deviceId(): string {
+export function deviceId(): string {
   const KEY = 'todo.deviceId';
   try {
     let id = localStorage.getItem(KEY);

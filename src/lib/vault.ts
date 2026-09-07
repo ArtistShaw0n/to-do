@@ -335,7 +335,7 @@ export function sortTasks(tasks: Task[]): Task[] {
  * only needs `bug` plus its module (`email`, `hris`, …) to file itself.
  */
 export const KIND_TAGS = new Set([
-  'bug', 'release', 'design', 'frontend', 'backend', 'responsive',
+  'bug', 'enhancement', 'release', 'design', 'frontend', 'backend', 'responsive',
   'architecture', 'requirements', 'billing', 'docs', 'test',
 ]);
 

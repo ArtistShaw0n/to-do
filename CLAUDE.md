@@ -89,10 +89,15 @@ Every task gets all of these. Both omissions below have been called out:
   project's name inside the title. Leaving it off makes the task look orphaned.
   If the project name isn't already in the title, put it there.
 - `--tag` — two kinds, and the app tells them apart:
-  - **Kind** tags say what the work *is*: `bug`, `release`, `design`, `frontend`,
-    `backend`, `responsive`, `architecture`, `requirements`, `billing`, `docs`,
-    `test`. The list lives in `KIND_TAGS` in `src/lib/vault.ts` — a new kind of
-    work must be added there, or it will be mistaken for a module.
+  - **Kind** tags say what the work *is*: `bug`, `enhancement`, `release`,
+    `design`, `frontend`, `backend`, `responsive`, `architecture`,
+    `requirements`, `billing`, `docs`, `test`. The list lives in `KIND_TAGS` in
+    `src/lib/vault.ts` — a new kind of work must be added there, or it will be
+    mistaken for a module.
+
+    `bug` is a defect; `enhancement` is a "would be better if". The QA sheet
+    separates them and so does the Bugs count, so don't tag an improvement
+    request as a bug.
   - **Any other tag is read as the module.** That is the whole convention: a bug
     needs `bug` + its module and it files itself under the right heading in the
     app's Bugs view.

@@ -282,7 +282,20 @@ async fn normalise_task(prompt: String) -> Result<String, String> {
 
         // stdin must be closed explicitly: `claude -p` waits several seconds
         // for piped input before deciding there is none.
+        // Run it from a directory of our own.
+        //
+        // A GUI app inherits "/" or the user's home as its working directory,
+        // and Claude Code looks around wherever it starts — so every protected
+        // folder it touched (Downloads, Documents, a MEGA volume) raised a
+        // macOS permission prompt naming *Vault*, since it is the parent
+        // process. Several different prompts, over and over.
+        //
+        // Application Support needs no permission and holds nothing to scan.
+        let workdir = app_support_dir().join("run");
+        let _ = fs::create_dir_all(&workdir);
+
         let mut child = Command::new(&bin)
+            .current_dir(&workdir)
             .arg("-p")
             .arg(&prompt)
             // Launch the app from a terminal that is itself inside a Claude Code

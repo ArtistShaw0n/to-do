@@ -53,11 +53,19 @@ export function useVault(): UseVault {
         // An existing JSON vault moves across once, before anything is shown,
         // so the first render is never of an empty list the user then watches
         // fill in.
-        try {
-          const { vault: fromFile } = await loadVault();
-          migrateFromFile(fromFile);
-        } catch {
-          // No file, or no Tauri to read one — nothing to bring over.
+        //
+        // Only worth reading when there is something to bring over. With a hub
+        // configured the vault already lives there, and the file is one that
+        // nothing writes any more — but it sits in a MEGA folder, which macOS
+        // treats as a removable volume, so opening it raises a permission
+        // prompt on every single launch.
+        if (!readSyncConfig()) {
+          try {
+            const { vault: fromFile } = await loadVault();
+            migrateFromFile(fromFile);
+          } catch {
+            // No file, or no Tauri to read one — nothing to bring over.
+          }
         }
 
         if (cancelled) return;

@@ -367,7 +367,18 @@ fn toggle_main(app: &AppHandle) {
 /// Watch the vault's directory and notify the frontend when someone else edits
 /// it. Directories are watched rather than the file itself because atomic
 /// rename replaces the inode, which breaks a file-level watch after one save.
+///
+/// Skipped entirely once a hub is configured. The watcher exists to catch the
+/// CLI editing the file, and with a hub the CLI writes there instead — so the
+/// only thing left to watch is a file nobody touches. That matters because the
+/// vault sits in a MEGA folder, which macOS treats as a removable volume:
+/// merely creating and watching that directory raises a permission prompt,
+/// over and over, for no benefit at all.
 fn spawn_vault_watcher(app: AppHandle) {
+    if sync_config().is_some() {
+        return;
+    }
+
     std::thread::spawn(move || {
         let dir = resolve_data_dir();
         if fs::create_dir_all(&dir).is_err() {

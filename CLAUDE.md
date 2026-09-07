@@ -115,8 +115,11 @@ Every task gets all of these. Both omissions below have been called out:
   restructure, the design system, permissions, handover to testing — carries no
   module tag, which is correct.
 
-- `--notes` — the real context, in his register. `"OERP module."` is not a note;
-  it says nothing the project chip doesn't already say.
+- `--notes` — **one or two lines. Distil, never transcribe.** He often describes
+  a bug at length; your job is to extract the point, not to relay the paragraph.
+  Aim under ~120 characters. Say what is wrong and what it should be — nothing
+  a reader could work out from the title or the project chip. `"OERP module."`
+  is too little; retelling his whole message is too much.
 - `--raw` — his exact words.
 
 ### Bugs and releases

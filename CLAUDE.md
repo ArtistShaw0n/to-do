@@ -302,8 +302,12 @@ no workflow runs, and nothing looks wrong until you go hunting for the release.
 Pushing the tag by name avoids the trap entirely.
 
 The tag push triggers `.github/workflows/release.yml`, which builds a universal
-binary, signs it, and publishes `latest.json`. Running apps notice within a day
-and show an update toast.
+binary, signs it, and publishes `latest.json`.
+
+`check()` runs once on mount in `src/App.tsx`, so an app that is already running
+will not notice — and closing the window only parks it in the menu bar. Shawon
+has to actually **quit** (tray → Quit, or ⌘Q) and reopen before the update toast
+appears.
 
 **The version in `package.json`, `src-tauri/tauri.conf.json`,
 `src-tauri/Cargo.toml` and the git tag must all match**, or the updater will not

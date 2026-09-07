@@ -274,7 +274,7 @@ Claude Code ──▶ bin/todo.mjs ──▶ data/tasks.json ◀── Rust fs-w
 | `src/lib/` | types, vault bridge, mutations, React hook |
 | `src/components/` | UI |
 | `src/styles/global.css` | the whole Liquid Glass design system |
-| `src-tauri/src/lib.rs` | storage, watcher, tray, vibrancy, hotkey |
+| `src-tauri/src/lib.rs` | storage, watcher, tray, hotkey |
 | `scripts/make-icon.mjs` | regenerates the icon from code |
 
 ---

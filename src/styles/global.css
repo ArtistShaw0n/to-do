@@ -64,7 +64,7 @@ svg {
   --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.05), 0 8px 22px rgba(0, 0, 0, 0.09);
   --shadow-pop: 0 8px 40px rgba(0, 0, 0, 0.15);
   --aurora-alpha: 0.5;
-  --web-bg: #eceef2;
+  --app-bg: #eceef2;
 }
 
 /* Dark tokens are declared twice on purpose: once for the system preference
@@ -86,7 +86,7 @@ svg {
     --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 22px rgba(0, 0, 0, 0.34);
     --shadow-pop: 0 8px 40px rgba(0, 0, 0, 0.5);
     --aurora-alpha: 0.5;
-    --web-bg: #121216;
+    --app-bg: #121216;
   }
 }
 
@@ -105,7 +105,7 @@ svg {
   --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 22px rgba(0, 0, 0, 0.34);
   --shadow-pop: 0 8px 40px rgba(0, 0, 0, 0.5);
   --aurora-alpha: 0.5;
-  --web-bg: #121216;
+  --app-bg: #121216;
 }
 
 body {
@@ -114,17 +114,20 @@ body {
   font-size: 13px;
   line-height: 1.45;
   color: var(--text-1);
-  background: transparent; /* let the NSVisualEffectView through */
+  /* Painted here, not left to the system vibrancy.
+     The window used to be transparent over an NSVisualEffectView, which meant
+     the aurora composited against a blurring, desaturating material in the app
+     but against a flat colour in the browser preview — the same CSS looked
+     different in each. Now both paint the same ground, so what is verified in
+     the preview is what ships. The cards are opaque anyway, so the vibrancy was
+     only ever visible in the margins. */
+  background: var(--app-bg);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
   cursor: default;
   -webkit-user-select: none;
   user-select: none;
 }
-
-/* Outside Tauri there is no vibrancy behind the transparent body, so the
-   browser preview needs its own ground. Set by main.tsx; never on in the app. */
-:root[data-web] body { background: var(--web-bg); }
 
 /* ── Aurora ───────────────────────────────────────────────────────────────── */
 

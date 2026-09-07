@@ -17,8 +17,6 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
-#[cfg(target_os = "macos")]
-use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
 
 const APP_ID: &str = "com.shawon.todo";
 
@@ -363,27 +361,10 @@ pub fn run() {
             let handle = app.handle().clone();
 
             if let Some(window) = app.get_webview_window("main") {
-                // Real NSVisualEffectView behind the webview. Everything the
-                // CSS layer draws sits on top of genuine system material.
-                #[cfg(target_os = "macos")]
-                {
-                    if apply_vibrancy(
-                        &window,
-                        NSVisualEffectMaterial::UnderWindowBackground,
-                        Some(NSVisualEffectState::Active),
-                        None,
-                    )
-                    .is_err()
-                    {
-                        // Older macOS: fall back to a material that always exists.
-                        let _ = apply_vibrancy(
-                            &window,
-                            NSVisualEffectMaterial::HudWindow,
-                            Some(NSVisualEffectState::Active),
-                            None,
-                        );
-                    }
-                }
+                // No vibrancy: the window paints its own background in CSS, so the
+                // browser preview and the shipped app render identically. An
+                // NSVisualEffectView here would only tint the margins, and it
+                // made the same colours look different in each.
 
                 // Closing the window parks the app in the menu bar instead of
                 // quitting — this is a background utility.

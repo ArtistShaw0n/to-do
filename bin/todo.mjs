@@ -586,7 +586,9 @@ commands.note = (positional, flags) => {
     process.stdout.write('\n');
     for (const n of [...vault.notes].sort((a, b) => (b.order || 0) - (a.order || 0))) {
       process.stdout.write(`  ${dim(n.id)}  ${bold(n.title)}\n`);
-      if (n.body) process.stdout.write(`          ${cyan(n.body.replace(/\n/g, ' / '))}\n`);
+      const bits = [n.kind, n.username, n.secret && '••••••', n.url].filter(Boolean);
+      if (bits.length) process.stdout.write(`          ${cyan(bits.join('  ·  '))}\n`);
+      if (n.body) process.stdout.write(`          ${dim(n.body.replace(/\n/g, ' / '))}\n`);
     }
     process.stdout.write('\n');
     return;
@@ -595,9 +597,18 @@ commands.note = (positional, flags) => {
   if (action === 'add') {
     const title = rest.join(' ').trim();
     if (!title) die('note add needs a title: todo note add "Tab PIN" --body "5665"');
+    const KINDS = ['login', 'wifi', 'code', 'other'];
+    const kind = flags.kind && flags.kind !== true ? String(flags.kind) : 'other';
+    if (!KINDS.includes(kind)) die(`kind must be one of: ${KINDS.join(', ')}`);
+
+    const str = (v) => (v && v !== true ? String(v) : undefined);
     const note = {
       id: newId(),
+      kind,
       title,
+      username: str(flags.user ?? flags.username),
+      secret: str(flags.secret ?? flags.pass),
+      url: str(flags.url),
       body: flags.body && flags.body !== true ? String(flags.body) : '',
       createdAt: nowISO(),
       updatedAt: nowISO(),
@@ -616,6 +627,10 @@ commands.note = (positional, flags) => {
     if (title) note.title = title;
     if (typeof flags.title === 'string') note.title = flags.title;
     if (typeof flags.body === 'string') note.body = flags.body;
+    if (typeof flags.kind === 'string') note.kind = flags.kind;
+    if (typeof flags.user === 'string') note.username = flags.user;
+    if (typeof flags.secret === 'string') note.secret = flags.secret;
+    if (typeof flags.url === 'string') note.url = flags.url;
     note.updatedAt = nowISO();
     saveVault(vault);
     process.stdout.write(`${green('✓ updated')}  ${dim(note.id)}  ${note.title}\n`);
@@ -714,7 +729,8 @@ ${bold('Daily brief')}
   digest [--date YYYY-MM-DD] [--json]
 
 ${bold('Notes')} ${dim('— reference material, never completed')}
-  note add <title> [--body "…"]      note list
+  note add <title> [--kind login|wifi|code|other] [--user X] [--secret X]
+                   [--url X] [--body "…"]        note list
   note edit <id> [new title] [--body "…"]       note rm <id>
 
 ${bold('Utility')}

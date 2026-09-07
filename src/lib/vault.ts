@@ -6,7 +6,7 @@
  * localStorage so the UI can be iterated on without a native build.
  */
 
-import { emptyVault, PROJECT_COLORS, type Note, type Priority, type Stats, type Status, type Task, type Vault } from './types';
+import { emptyVault, NOTE_KINDS, PROJECT_COLORS, type Note, type NoteKind, type Priority, type Stats, type Status, type Task, type Vault } from './types';
 import { todayISO } from './dates';
 
 const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -88,7 +88,13 @@ function normalise(raw: Partial<Vault>): Vault {
       order: typeof t.order === 'number' ? t.order : i,
       source: t.source ?? 'app',
     })),
-    notes: (raw.notes ?? []).map((n, i) => ({ ...n, order: typeof n.order === 'number' ? n.order : i })),
+    notes: (raw.notes ?? []).map((n, i) => ({
+      ...n,
+      // Notes written before kinds existed become plain ones.
+      kind: NOTE_KINDS.includes(n.kind as NoteKind) ? n.kind : ('other' as NoteKind),
+      body: n.body ?? '',
+      order: typeof n.order === 'number' ? n.order : i,
+    })),
     projects: raw.projects ?? [],
     digests: raw.digests ?? [],
     meta: { ...base.meta, ...(raw.meta ?? {}) },
@@ -232,14 +238,26 @@ export function toggleSubtask(vault: Vault, taskId: string, subId: string): Vaul
 
 // ── Notes ────────────────────────────────────────────────────────────────────
 
-export function addNote(vault: Vault, title: string, body = ''): Vault {
+export function addNote(vault: Vault, draft: Partial<Note> & { title: string }): Vault {
   const seq = (vault.meta.lastSeq ?? 0) + 1;
   const now = new Date().toISOString();
   return {
     ...vault,
-    notes: [...vault.notes, { id: newId(), title, body, createdAt: now, updatedAt: now, order: seq }],
+    notes: [
+      ...vault.notes,
+      { id: newId(), kind: 'other', body: '', createdAt: now, updatedAt: now, order: seq, ...draft },
+    ],
     meta: { ...vault.meta, lastSeq: seq },
   };
+}
+
+/** Free-text search across every field, the way a password manager searches. */
+export function searchNotes(notes: Note[], query: string): Note[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return notes;
+  return notes.filter((n) =>
+    `${n.title} ${n.username ?? ''} ${n.url ?? ''} ${n.body}`.toLowerCase().includes(q),
+  );
 }
 
 export function updateNote(vault: Vault, id: string, patch: Partial<Note>): Vault {

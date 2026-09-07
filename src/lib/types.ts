@@ -75,9 +75,25 @@ export interface Digest {
  * is never completed, so keeping it out of the task list keeps it out of the
  * counts, the tray badge and the Completed section.
  */
+export const NOTE_KINDS = ['login', 'wifi', 'code', 'other'] as const;
+export type NoteKind = (typeof NOTE_KINDS)[number];
+
+export const NOTE_KIND_META: Record<NoteKind, { label: string; plural: string; color: string }> = {
+  login: { label: 'Login', plural: 'Logins', color: 'var(--blue)' },
+  wifi: { label: 'Wi-Fi', plural: 'Wi-Fi', color: 'var(--teal)' },
+  code: { label: 'Code', plural: 'Codes', color: 'var(--orange)' },
+  other: { label: 'Note', plural: 'Notes', color: 'var(--text-2)' },
+};
+
 export interface Note {
   id: string;
+  kind: NoteKind;
   title: string;
+  /** Account name, network name, whatever the secret belongs to. */
+  username?: string;
+  /** The part that stays masked until revealed. */
+  secret?: string;
+  url?: string;
   body: string;
   createdAt: string;
   updatedAt: string;

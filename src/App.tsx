@@ -6,7 +6,7 @@ import {
 } from './lib/vault';
 import { useVault } from './lib/useVault';
 import { TaskRow } from './components/TaskRow';
-import { NoteRow } from './components/NoteRow';
+import { NotesView } from './components/NotesView';
 import { Composer } from './components/Composer';
 
 /** Keep the completed list from growing without bound in the UI. */
@@ -222,30 +222,17 @@ export default function App() {
 
         <div className="sheet-scroll" onClick={() => setEditingId(null)}>
           {view === 'notes' ? (
-            notes.length === 0 ? (
-              <div className="empty">
-                <div className="empty-mark">✎</div>
-                <div className="empty-title">No notes</div>
-                <div>Things to look up, not to do.</div>
-              </div>
-            ) : (
-              <div className="task-stack">
-                {notes.map((note) => (
-                  <NoteRow
-                    key={note.id}
-                    note={note}
-                    editing={editingId === note.id}
-                    onOpen={() => setEditingId(note.id)}
-                    onClose={() => setEditingId(null)}
-                    onPatch={(patch) => void mutate((v) => updateNote(v, note.id, patch))}
-                    onDelete={() => {
-                      void mutate((v) => deleteNote(v, note.id));
-                      setEditingId(null);
-                    }}
-                  />
-                ))}
-              </div>
-            )
+            <NotesView
+              notes={notes}
+              editingId={editingId}
+              onOpen={setEditingId}
+              onClose={() => setEditingId(null)}
+              onPatch={(id, patch) => void mutate((v) => updateNote(v, id, patch))}
+              onDelete={(id) => {
+                void mutate((v) => deleteNote(v, id));
+                setEditingId(null);
+              }}
+            />
           ) : view === 'all' || view === 'personal' ? (
             open.length === 0 ? (
               <div className="empty">
@@ -327,7 +314,7 @@ export default function App() {
         </div>
 
         {view === 'notes' ? (
-          <NoteComposer onAdd={(title) => void mutate((v) => addNote(v, title))} />
+          <NoteComposer onAdd={(title) => void mutate((v) => addNote(v, { title }))} />
         ) : (
           <Composer
             projects={vault.projects.map((p) => p.name)}

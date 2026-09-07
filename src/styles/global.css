@@ -479,7 +479,38 @@ body {
 }
 
 .composer input::placeholder { color: var(--text-3); }
-.composer-hint { flex: none; font-size: 11px; color: var(--text-3); }
+
+/* The old hint was a "⏎" glyph, which says nothing on a phone: there is no
+   visible return key until the keyboard is up, and no way to press it with a
+   thumb while reading what you typed. This is a real target. */
+.composer-send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text-3);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast), transform var(--fast);
+}
+
+/* Nothing to send yet: visible, so its position is learned, but plainly inert. */
+.composer-send:disabled { cursor: default; opacity: 0.45; }
+
+.composer-send[data-ready='true'] {
+  color: #fff;
+  background: var(--tint);
+}
+
+.composer-send[data-ready='true']:active { transform: scale(0.92); }
+
+@media (max-width: 520px) {
+  /* Comfortably thumb-sized. */
+  .composer-send { width: 34px; height: 34px; }
+}
 
 /* ── Empty state ──────────────────────────────────────────────────────────── */
 

@@ -275,7 +275,8 @@ export function deleteNote(vault: Vault, id: string): Vault {
 
 /** Newest first, matching the task list. */
 export function sortNotes(notes: Note[]): Note[] {
-  return [...notes].sort((a, b) => b.order - a.order);
+  return [...notes].sort((a, b) =>
+    (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || b.order - a.order);
 }
 
 // ── Derived data ──────────────────────────────────────────────────────────────
@@ -325,8 +326,18 @@ function computeStreak(vault: Vault, day: string): number {
  * could land halfway down the list, out of sight; in a list this short, seeing
  * what you just added matters more than ordering by importance.
  */
+/**
+ * Newest first, by when it was written.
+ *
+ * `order` used to decide this, but it counts up from a per-vault sequence, and
+ * two devices working apart both reach the same next number — four collisions
+ * in fifty-two tasks here. Ties then broke arbitrarily and a task typed minutes
+ * ago sat below one from yesterday. A timestamp is the same on every device and
+ * needs no coordination, so it decides, with `order` left only as a tiebreak.
+ */
 export function sortTasks(tasks: Task[]): Task[] {
-  return [...tasks].sort((a, b) => b.order - a.order);
+  return [...tasks].sort((a, b) =>
+    (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || b.order - a.order);
 }
 
 /**

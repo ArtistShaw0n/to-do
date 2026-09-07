@@ -12,7 +12,7 @@ import {
 } from './lib/normalise';
 import { useVault } from './lib/useVault';
 import { NoteDetail, TaskDetail } from './components/DetailPane';
-import { CheckGlyph, NoteGlyph, ViewGlyph, type ViewGlyphName } from './components/glyphs';
+import { CheckGlyph, NoteGlyph, SendGlyph, ViewGlyph, type ViewGlyphName } from './components/glyphs';
 import { SyncBadge, SyncSetup, hasSyncConfig } from './components/SyncSetup';
 
 type ThemeMode = 'system' | 'light' | 'dark';
@@ -438,13 +438,25 @@ function Composer({ noun, onAdd }: { noun: string; onAdd: (raw: string) => void 
           value={value}
           placeholder={`Add a ${noun}…`}
           spellCheck={false}
+          enterKeyHint="done"
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); submit(); }
             else if (e.key === 'Escape') { setValue(''); e.currentTarget.blur(); }
           }}
         />
-        <span className="composer-hint">⏎</span>
+        <button
+          className="composer-send"
+          data-ready={value.trim().length > 0}
+          disabled={!value.trim()}
+          aria-label={`Add this ${noun}`}
+          // The keyboard steals focus from the input on mousedown, which
+          // closes it on a phone before the click ever lands.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={submit}
+        >
+          <SendGlyph />
+        </button>
       </div>
     </div>
   );

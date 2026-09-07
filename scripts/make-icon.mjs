@@ -82,7 +82,35 @@ function squircle(x, y, cx, cy, radius, n = 5) {
   return dx ** n + dy ** n <= 1;
 }
 
-/** Distance from point p to segment ab — used to stroke the checkmark. */
+/**
+ * A keyhole: a disc with a tapering slot beneath it.
+ *
+ * It replaced a checkmark, which said "to-do list" when this became a place for
+ * passwords and notes too. A keyhole survives being shrunk to a menu-bar glyph
+ * in a way a tick and a lock body do not — the silhouette stays unmistakable at
+ * sixteen pixels, which is the only size that really has to work.
+ *
+ * Coordinates are fractions of the canvas, so one definition serves both the
+ * app icon and the tray glyph.
+ */
+function inKeyhole(px, py, size, scale = 1, ox = 0.5, oy = 0.5) {
+  const f = (v) => size * v;
+  const rel = (fx, fy) => [f(ox + (fx - 0.5) * scale), f(oy + (fy - 0.5) * scale)];
+
+  const [kx, ky] = rel(0.5, 0.435);
+  if (Math.hypot(px - kx, py - ky) <= f(0.088 * scale)) return true;
+
+  const [, topY] = rel(0.5, 0.46);
+  const [, botY] = rel(0.5, 0.675);
+  if (py < topY || py > botY) return false;
+
+  // The slot flares as it descends, the way a real escutcheon does.
+  const t = (py - topY) / (botY - topY);
+  const half = f((0.030 + (0.058 - 0.030) * t * t) * scale);
+  return Math.abs(px - kx) <= half;
+}
+
+/** Distance from point p to segment ab. */
 function distToSegment(px, py, ax, ay, bx, by) {
   const abx = bx - ax;
   const aby = by - ay;
@@ -127,12 +155,6 @@ function drawAppIcon(size = 1024) {
   // macOS icon grid: the shape occupies ~80% of the canvas, rest is padding.
   const radius = size * 0.402;
 
-  // Checkmark control points, expressed as fractions of the canvas.
-  const p = (fx, fy) => [size * fx, size * fy];
-  const [ax, ay] = p(0.345, 0.508);
-  const [bx, by] = p(0.452, 0.618);
-  const [ex, ey] = p(0.668, 0.392);
-  const strokeHalf = size * 0.0345;
 
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
@@ -147,11 +169,9 @@ function drawAppIcon(size = 1024) {
           if (!squircle(px, py, cx, cy, radius)) continue;
           shapeHits += 1;
 
-          const d = Math.min(
-            distToSegment(px, py, ax, ay, bx, by),
-            distToSegment(px, py, bx, by, ex, ey),
-          );
-          if (d <= strokeHalf) markHits += 1;
+          // 1.2 fills the tile the way Apple's own marks do; smaller left the
+          // squircle looking empty around it.
+          if (inKeyhole(px, py, size, 1.2)) markHits += 1;
         }
       }
 
@@ -187,7 +207,7 @@ function drawAppIcon(size = 1024) {
 }
 
 /**
- * Menu bar glyph: a checkmark inside a rounded outline, drawn in pure black
+ * Menu bar glyph: the keyhole knocked out of a rounded square, in pure black
  * with alpha. macOS recolours template images to match the menu bar.
  */
 function drawTrayIcon(size = 88) {
@@ -195,13 +215,6 @@ function drawTrayIcon(size = 88) {
   const cx = size / 2;
   const cy = size / 2;
   const outer = size * 0.40;
-  const ringWidth = size * 0.075;
-
-  const p = (fx, fy) => [size * fx, size * fy];
-  const [ax, ay] = p(0.335, 0.505);
-  const [bx, by] = p(0.452, 0.625);
-  const [ex, ey] = p(0.678, 0.372);
-  const strokeHalf = size * 0.052;
 
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
@@ -211,15 +224,11 @@ function drawTrayIcon(size = 88) {
           const px = x + (sx + 0.5) / SS;
           const py = y + (sy + 0.5) / SS;
 
-          const inOuter = squircle(px, py, cx, cy, outer);
-          const inInner = squircle(px, py, cx, cy, outer - ringWidth);
-          const onRing = inOuter && !inInner;
-
-          const d = Math.min(
-            distToSegment(px, py, ax, ay, bx, by),
-            distToSegment(px, py, bx, by, ex, ey),
-          );
-          if (onRing || d <= strokeHalf) hits += 1;
+          // Solid body with the keyhole cut out: at menu-bar size a filled
+          // shape reads, where an outline plus a mark inside turns to mush.
+          if (squircle(px, py, cx, cy, outer) && !inKeyhole(px, py, size, 1.06)) {
+            hits += 1;
+          }
         }
       }
 

@@ -118,3 +118,14 @@ export function CheckGlyph({ size = 11 }: { size?: number }) {
     </svg>
   );
 }
+
+/** An upward arrow, the shape every messaging app uses for "send". */
+export function SendGlyph({ size = 15 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor"
+      strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 13V3.6" />
+      <path d="M3.8 7.8L8 3.4l4.2 4.4" />
+    </svg>
+  );
+}

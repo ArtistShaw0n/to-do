@@ -6,7 +6,7 @@
  * localStorage so the UI can be iterated on without a native build.
  */
 
-import { emptyVault, PROJECT_COLORS, type Priority, type Stats, type Status, type Task, type Vault } from './types';
+import { emptyVault, PROJECT_COLORS, type Note, type Priority, type Stats, type Status, type Task, type Vault } from './types';
 import { todayISO } from './dates';
 
 const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -88,6 +88,7 @@ function normalise(raw: Partial<Vault>): Vault {
       order: typeof t.order === 'number' ? t.order : i,
       source: t.source ?? 'app',
     })),
+    notes: (raw.notes ?? []).map((n, i) => ({ ...n, order: typeof n.order === 'number' ? n.order : i })),
     projects: raw.projects ?? [],
     digests: raw.digests ?? [],
     meta: { ...base.meta, ...(raw.meta ?? {}) },
@@ -227,6 +228,36 @@ export function toggleSubtask(vault: Vault, taskId: string, subId: string): Vaul
   return updateTask(vault, taskId, {
     subtasks: task.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)),
   });
+}
+
+// ── Notes ────────────────────────────────────────────────────────────────────
+
+export function addNote(vault: Vault, title: string, body = ''): Vault {
+  const seq = (vault.meta.lastSeq ?? 0) + 1;
+  const now = new Date().toISOString();
+  return {
+    ...vault,
+    notes: [...vault.notes, { id: newId(), title, body, createdAt: now, updatedAt: now, order: seq }],
+    meta: { ...vault.meta, lastSeq: seq },
+  };
+}
+
+export function updateNote(vault: Vault, id: string, patch: Partial<Note>): Vault {
+  return {
+    ...vault,
+    notes: vault.notes.map((n) =>
+      n.id === id ? { ...n, ...patch, updatedAt: new Date().toISOString() } : n,
+    ),
+  };
+}
+
+export function deleteNote(vault: Vault, id: string): Vault {
+  return { ...vault, notes: vault.notes.filter((n) => n.id !== id) };
+}
+
+/** Newest first, matching the task list. */
+export function sortNotes(notes: Note[]): Note[] {
+  return [...notes].sort((a, b) => b.order - a.order);
 }
 
 // ── Derived data ──────────────────────────────────────────────────────────────

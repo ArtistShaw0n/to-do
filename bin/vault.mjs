@@ -75,6 +75,7 @@ export function emptyVault() {
   return {
     version: SCHEMA_VERSION,
     tasks: [],
+    notes: [],
     projects: [],
     digests: [],
     meta: { createdAt: nowISO(), updatedAt: nowISO(), lastSeq: 0 },
@@ -114,6 +115,7 @@ export function saveVault(vault) {
 function migrate(v) {
   const out = { ...emptyVault(), ...v };
   out.tasks = Array.isArray(v.tasks) ? v.tasks : [];
+  out.notes = Array.isArray(v.notes) ? v.notes : [];
   out.projects = Array.isArray(v.projects) ? v.projects : [];
   out.digests = Array.isArray(v.digests) ? v.digests : [];
   out.meta = { ...emptyVault().meta, ...(v.meta || {}) };

@@ -559,6 +559,81 @@ commands.digest = (positional, flags) => {
   process.stdout.write(found ? `\n${found.markdown}\n\n` : dim(`no digest written for ${day}\n`));
 };
 
+/**
+ * Reference material — a PIN, a wifi password, a meter reading. Kept apart from
+ * tasks because a note is never completed, so it must not reach the counts, the
+ * tray badge or the Completed section.
+ */
+commands.note = (positional, flags) => {
+  const [action, ...rest] = positional;
+  const vault = loadVault();
+  vault.notes = vault.notes || [];
+
+  const find = (needle) => {
+    const q = String(needle || '').toLowerCase();
+    const exact = vault.notes.find((n) => n.id === q);
+    if (exact) return exact;
+    const hits = vault.notes.filter(
+      (n) => n.id.startsWith(q) || n.title.toLowerCase().includes(q),
+    );
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) die(`"${needle}" matches ${hits.length} notes → ${hits.map((n) => n.id).join(', ')}`);
+    return null;
+  };
+
+  if (!action || action === 'list') {
+    if (!vault.notes.length) { process.stdout.write(`${dim('no notes')}\n`); return; }
+    process.stdout.write('\n');
+    for (const n of [...vault.notes].sort((a, b) => (b.order || 0) - (a.order || 0))) {
+      process.stdout.write(`  ${dim(n.id)}  ${bold(n.title)}\n`);
+      if (n.body) process.stdout.write(`          ${cyan(n.body.replace(/\n/g, ' / '))}\n`);
+    }
+    process.stdout.write('\n');
+    return;
+  }
+
+  if (action === 'add') {
+    const title = rest.join(' ').trim();
+    if (!title) die('note add needs a title: todo note add "Tab PIN" --body "5665"');
+    const note = {
+      id: newId(),
+      title,
+      body: flags.body && flags.body !== true ? String(flags.body) : '',
+      createdAt: nowISO(),
+      updatedAt: nowISO(),
+      order: (vault.meta.lastSeq = (vault.meta.lastSeq || 0) + 1),
+    };
+    vault.notes.push(note);
+    saveVault(vault);
+    process.stdout.write(`${green('✓ note added')}  ${dim(note.id)}  ${note.title}\n`);
+    return;
+  }
+
+  if (action === 'edit') {
+    const note = find(rest[0]);
+    if (!note) die(`no note matching "${rest[0]}"`);
+    const title = rest.slice(1).join(' ').trim();
+    if (title) note.title = title;
+    if (typeof flags.title === 'string') note.title = flags.title;
+    if (typeof flags.body === 'string') note.body = flags.body;
+    note.updatedAt = nowISO();
+    saveVault(vault);
+    process.stdout.write(`${green('✓ updated')}  ${dim(note.id)}  ${note.title}\n`);
+    return;
+  }
+
+  if (action === 'rm' || action === 'delete') {
+    const note = find(rest[0]);
+    if (!note) die(`no note matching "${rest[0]}"`);
+    vault.notes = vault.notes.filter((n) => n.id !== note.id);
+    saveVault(vault);
+    process.stdout.write(`${red('✗ deleted')}  ${dim(note.id)}  ${note.title}\n`);
+    return;
+  }
+
+  die(`unknown note action "${action}" — use list | add | edit | rm`);
+};
+
 commands.projects = (_positional, flags) => {
   const vault = loadVault();
 
@@ -637,6 +712,10 @@ ${bold('Daily brief')}
   digest --write "<markdown>"   store today's summary (Claude writes this)
   digest --auto                 compose one from the vault, no Claude needed
   digest [--date YYYY-MM-DD] [--json]
+
+${bold('Notes')} ${dim('— reference material, never completed')}
+  note add <title> [--body "…"]      note list
+  note edit <id> [new title] [--body "…"]       note rm <id>
 
 ${bold('Utility')}
   init                 create vault + app config

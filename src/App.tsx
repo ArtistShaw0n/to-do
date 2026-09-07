@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { longDate } from './lib/dates';
 import {
-  addTask, deleteTask, groupBugsByModule, isOpen, sortTasks, toggleDone, updateTask,
+  addNote, addTask, deleteNote, deleteTask, groupBugsByModule, isOpen,
+  sortNotes, sortTasks, toggleDone, updateNote, updateTask,
 } from './lib/vault';
 import { useVault } from './lib/useVault';
 import { TaskRow } from './components/TaskRow';
+import { NoteRow } from './components/NoteRow';
 import { Composer } from './components/Composer';
 
 /** Keep the completed list from growing without bound in the UI. */
@@ -13,7 +15,10 @@ const RECENT_DONE = 50;
 type ThemeMode = 'system' | 'light' | 'dark';
 const THEME_ORDER: ThemeMode[] = ['system', 'light', 'dark'];
 
-type View = 'all' | 'bugs';
+type View = 'all' | 'personal' | 'bugs' | 'notes';
+
+/** The project the Personal tab filters to. */
+const PERSONAL = 'Personal';
 
 export default function App() {
   const { vault, error, mutate } = useVault();
@@ -71,12 +76,19 @@ export default function App() {
     };
   }, []);
 
-  const open = useMemo(() => (vault ? sortTasks(vault.tasks.filter(isOpen)) : []), [vault]);
+  const open = useMemo(() => {
+    if (!vault) return [];
+    const live = vault.tasks.filter(isOpen);
+    // "All" still means everything; Personal is a view onto part of it.
+    return sortTasks(view === 'personal' ? live.filter((t) => t.project === PERSONAL) : live);
+  }, [vault, view]);
   const bugGroups = useMemo(() => (vault ? groupBugsByModule(vault) : []), [vault]);
   const openBugCount = useMemo(
     () => bugGroups.reduce((n, g) => n + g.bugs.length, 0),
     [bugGroups],
   );
+
+  const notes = useMemo(() => (vault ? sortNotes(vault.notes) : []), [vault]);
 
   const done = useMemo(() => {
     if (!vault) return [];
@@ -84,8 +96,11 @@ export default function App() {
       .filter((t) => !isOpen(t))
       .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''));
     // The Completed section belongs to whichever view you're in.
-    return (view === 'bugs' ? finished.filter((t) => t.tags.includes('bug')) : finished)
-      .slice(0, RECENT_DONE);
+    const scoped =
+      view === 'bugs' ? finished.filter((t) => t.tags.includes('bug'))
+        : view === 'personal' ? finished.filter((t) => t.project === PERSONAL)
+        : finished;
+    return scoped.slice(0, RECENT_DONE);
   }, [vault, view]);
 
   if (error && !vault) {
@@ -126,7 +141,12 @@ export default function App() {
       <main className="sheet">
         <header className="sheet-head">
           <div>
-            <h1 className="sheet-title">{view === 'bugs' ? 'Bugs' : 'Tasks'}</h1>
+            <h1 className="sheet-title">
+              {view === 'bugs' ? 'Bugs'
+                : view === 'notes' ? 'Notes'
+                : view === 'personal' ? 'Personal'
+                : 'Tasks'}
+            </h1>
             <p className="sheet-date">{longDate()}</p>
           </div>
 
@@ -144,6 +164,16 @@ export default function App() {
               </button>
               <button
                 role="tab"
+                aria-selected={view === 'personal'}
+                onClick={() => {
+                  setView('personal');
+                  setEditingId(null);
+                }}
+              >
+                Personal
+              </button>
+              <button
+                role="tab"
                 aria-selected={view === 'bugs'}
                 onClick={() => {
                   setView('bugs');
@@ -152,6 +182,16 @@ export default function App() {
               >
                 Bugs
                 {openBugCount > 0 && <span className="seg-count">{openBugCount}</span>}
+              </button>
+              <button
+                role="tab"
+                aria-selected={view === 'notes'}
+                onClick={() => {
+                  setView('notes');
+                  setEditingId(null);
+                }}
+              >
+                Notes
               </button>
             </div>
 
@@ -181,11 +221,38 @@ export default function App() {
         </header>
 
         <div className="sheet-scroll" onClick={() => setEditingId(null)}>
-          {view === 'all' ? (
+          {view === 'notes' ? (
+            notes.length === 0 ? (
+              <div className="empty">
+                <div className="empty-mark">✎</div>
+                <div className="empty-title">No notes</div>
+                <div>Things to look up, not to do.</div>
+              </div>
+            ) : (
+              <div className="task-stack">
+                {notes.map((note) => (
+                  <NoteRow
+                    key={note.id}
+                    note={note}
+                    editing={editingId === note.id}
+                    onOpen={() => setEditingId(note.id)}
+                    onClose={() => setEditingId(null)}
+                    onPatch={(patch) => void mutate((v) => updateNote(v, note.id, patch))}
+                    onDelete={() => {
+                      void mutate((v) => deleteNote(v, note.id));
+                      setEditingId(null);
+                    }}
+                  />
+                ))}
+              </div>
+            )
+          ) : view === 'all' || view === 'personal' ? (
             open.length === 0 ? (
               <div className="empty">
                 <div className="empty-mark">✓</div>
-                <div className="empty-title">All clear</div>
+                <div className="empty-title">
+                  {view === 'personal' ? 'Nothing personal pending' : 'All clear'}
+                </div>
                 <div>Add one below.</div>
               </div>
             ) : (
@@ -233,7 +300,7 @@ export default function App() {
             ))
           )}
 
-          {done.length > 0 && (
+          {view !== 'notes' && done.length > 0 && (
             <>
               <button
                 className="done-toggle"
@@ -259,13 +326,18 @@ export default function App() {
           )}
         </div>
 
-        <Composer
-          projects={vault.projects.map((p) => p.name)}
-          // Anything added from the Bugs view is a bug; the placeholder says so
-          // rather than tagging silently.
-          forceTags={view === 'bugs' ? ['bug'] : undefined}
-          onAdd={(draft) => void mutate((v) => addTask(v, draft))}
-        />
+        {view === 'notes' ? (
+          <NoteComposer onAdd={(title) => void mutate((v) => addNote(v, title))} />
+        ) : (
+          <Composer
+            projects={vault.projects.map((p) => p.name)}
+            // Anything added from the Bugs view is a bug; the placeholder says
+            // so rather than tagging silently.
+            forceTags={view === 'bugs' ? ['bug'] : undefined}
+            forceProject={view === 'personal' ? PERSONAL : undefined}
+            onAdd={(draft) => void mutate((v) => addTask(v, draft))}
+          />
+        )}
       </main>
 
       {update && (
@@ -277,5 +349,41 @@ export default function App() {
         </div>
       )}
     </>
+  );
+}
+
+function NoteComposer({ onAdd }: { onAdd: (title: string) => void }) {
+  const [value, setValue] = useState('');
+
+  const submit = () => {
+    const title = value.trim();
+    if (!title) return;
+    onAdd(title);
+    setValue('');
+  };
+
+  return (
+    <div className="composer">
+      <div className="composer-shell">
+        <div className="composer-row">
+          <input
+            value={value}
+            placeholder="Add a note…"
+            spellCheck={false}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                submit();
+              } else if (e.key === 'Escape') {
+                setValue('');
+                e.currentTarget.blur();
+              }
+            }}
+          />
+          <span className="composer-hint">⏎</span>
+        </div>
+      </div>
+    </div>
   );
 }

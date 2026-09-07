@@ -69,9 +69,25 @@ export interface Digest {
   author: string;
 }
 
+/**
+ * A note is reference material, not work: a PIN, a wifi password, a meter
+ * reading. It is deliberately *not* a Task — it has no status, no due date and
+ * is never completed, so keeping it out of the task list keeps it out of the
+ * counts, the tray badge and the Completed section.
+ */
+export interface Note {
+  id: string;
+  title: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  order: number;
+}
+
 export interface Vault {
   version: number;
   tasks: Task[];
+  notes: Note[];
   projects: Project[];
   digests: Digest[];
   meta: {
@@ -107,6 +123,7 @@ export function emptyVault(): Vault {
   return {
     version: 1,
     tasks: [],
+    notes: [],
     projects: [],
     digests: [],
     meta: { createdAt: now, updatedAt: now, lastSeq: 0 },

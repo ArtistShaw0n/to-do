@@ -55,10 +55,12 @@ interface Props {
   projects: string[];
   /** Tags every task added from the current view should carry (e.g. `bug`). */
   forceTags?: string[];
+  /** Project every task added from the current view belongs to. */
+  forceProject?: string;
   onAdd: (draft: Partial<Task> & { title: string }) => void;
 }
 
-export function Composer({ projects, forceTags, onAdd }: Props) {
+export function Composer({ projects, forceTags, forceProject, onAdd }: Props) {
   const [value, setValue] = useState('');
   const [notes, setNotes] = useState('');
   const [tags, setTags] = useState('');
@@ -78,7 +80,7 @@ export function Composer({ projects, forceTags, onAdd }: Props) {
       ...draft,
       ...(notes.trim() ? { notes: notes.trim() } : {}),
       ...(allTags.length ? { tags: allTags } : {}),
-      ...(project.trim() ? { project: project.trim() } : {}),
+      ...(project.trim() || forceProject ? { project: project.trim() || forceProject } : {}),
     });
 
     setValue('');
@@ -99,9 +101,11 @@ export function Composer({ projects, forceTags, onAdd }: Props) {
 
   const shortest = [...projects].sort((a, b) => a.length - b.length)[0];
   const noun = forceTags?.includes('bug') ? 'a bug' : 'a task';
-  const hint = shortest
-    ? `Add ${noun}…   #${shortest}  @module  tomorrow`
-    : `Add ${noun}…   @module  tomorrow`;
+  const hint = forceProject
+    ? `Add ${noun}…   tomorrow`
+    : shortest
+      ? `Add ${noun}…   #${shortest}  @module  tomorrow`
+      : `Add ${noun}…   @module  tomorrow`;
 
   return (
     <div className="composer">

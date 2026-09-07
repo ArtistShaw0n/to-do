@@ -854,3 +854,18 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
 }
+
+/* Windows and Linux ──────────────────────────────────────────────────────── */
+
+/* The sheet's top padding exists to clear macOS traffic lights. Elsewhere the
+   window controls are on the right and that headroom is just wasted space. */
+:root[data-platform='windows'] .sheet,
+:root[data-platform='linux'] .sheet {
+  padding-top: 16px;
+}
+
+/* The drag strip has to stop short of the controls, which sit top-right. */
+:root[data-platform='windows'] .drag-strip,
+:root[data-platform='linux'] .drag-strip {
+  right: 140px;
+}

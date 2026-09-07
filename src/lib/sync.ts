@@ -12,10 +12,22 @@
  */
 
 import { createMergeableStore, type MergeableStore } from 'tinybase';
+import { createCustomPersister, type Persister, type Persists } from 'tinybase/persisters';
+
+/**
+ * `Persists.MergeableStoreOnly`, spelled out.
+ *
+ * TinyBase declares Persists as an ambient const enum, which `isolatedModules`
+ * forbids reading at runtime — the value has to be inlined, and inlining is
+ * exactly what isolated compilation cannot do. The type still comes from the
+ * enum, so this cannot drift silently.
+ */
+const MERGEABLE_STORE_ONLY = 2 as Persists.MergeableStoreOnly;
 import { createIndexedDbPersister } from 'tinybase/persisters/persister-indexed-db';
 import { createWsSynchronizer } from 'tinybase/synchronizers/synchronizer-ws-client';
 import type { Vault } from './types';
 import { applyVaultToStore, storeToVault } from './store';
+import { loadVault, onVaultChanged, saveVault } from './vault';
 
 const DB_NAME = 'todo-vault';
 const CONFIG_KEY = 'todo.sync';
@@ -72,9 +84,49 @@ function deviceId(): string {
   }
 }
 
+const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+/**
+ * On a Mac, the JSON file stays the local copy.
+ *
+ * IndexedDB would be the obvious choice, and it is what the phones use — but
+ * `bin/todo.mjs` reads that file, and with no hub configured yet it is the only
+ * thing the two share. Persisting to IndexedDB instead would leave the app and
+ * the CLI writing to different places and quietly diverging, which is a worse
+ * problem than the one being solved.
+ *
+ * So the file remains the local ground and the hub is what makes it shared.
+ * Both stay true at once, and nothing breaks before the hub exists.
+ */
+function createFilePersister(store: MergeableStore): Persister<Persists.MergeableStoreOnly> {
+  return createCustomPersister<() => void, Persists.MergeableStoreOnly>(
+    store,
+    async () => {
+      const { vault } = await loadVault();
+      const scratch = createMergeableStore();
+      applyVaultToStore(scratch, vault);
+      return scratch.getMergeableContent();
+    },
+    async () => {
+      await saveVault(storeToVault(store));
+    },
+    // Claude and the CLI still write this file directly, so keep watching it.
+    (listener) => {
+      let dispose: (() => void) | undefined;
+      void onVaultChanged(() => listener()).then((fn) => { dispose = fn; });
+      return () => dispose?.();
+    },
+    (handle) => handle(),
+    undefined,
+    MERGEABLE_STORE_ONLY,
+  );
+}
+
 /** Load whatever this device already had. Resolves once the UI can render. */
 export async function startLocalPersistence(): Promise<() => void> {
-  const persister = createIndexedDbPersister(getStore(), DB_NAME, 1);
+  const persister = inTauri
+    ? createFilePersister(getStore())
+    : createIndexedDbPersister(getStore(), DB_NAME, 1);
   await persister.load();
   await persister.startAutoSave();
   return () => void persister.destroy();
@@ -97,24 +149,58 @@ export async function startSync(
   let retry: ReturnType<typeof setTimeout> | undefined;
   let attempt = 0;
 
+  /**
+   * Tear the previous attempt down before starting another.
+   *
+   * Without this each reconnection left the old synchronizer attached to a dead
+   * socket, still trying to send: "WebSocket is already in CLOSING or CLOSED
+   * state", once per attempt, forever. A phone moving in and out of signal
+   * would accumulate them all day.
+   */
+  const teardown = async () => {
+    const [oldSync, oldSocket] = [synchronizer, socket];
+    synchronizer = null;
+    socket = null;
+    try { await oldSync?.destroy(); } catch { /* already gone */ }
+    try { oldSocket?.close(); } catch { /* already closed */ }
+  };
+
   const connect = async () => {
     if (closed) return;
+    await teardown();
     onState('connecting');
     try {
-      socket = new WebSocket(`${config.url.replace(/\/$/, '')}/sync/${config.key}`);
-      synchronizer = await createWsSynchronizer(getStore(), socket as never);
+      const ws = new WebSocket(`${config.url.replace(/\/$/, '')}/sync/${config.key}`);
+      socket = ws;
+
+      // Waiting for the handshake before attaching means the synchronizer never
+      // writes into a socket that is still connecting or already refused.
+      await new Promise<void>((resolve, reject) => {
+        if (ws.readyState === WebSocket.OPEN) return resolve();
+        const done = () => { ws.removeEventListener('open', onOpen); ws.removeEventListener('error', onError); };
+        const onOpen = () => { done(); resolve(); };
+        const onError = () => { done(); reject(new Error('could not reach the hub')); };
+        ws.addEventListener('open', onOpen);
+        ws.addEventListener('error', onError);
+        setTimeout(() => { done(); reject(new Error('the hub did not answer')); }, 10_000);
+      });
+      if (closed) return void (await teardown());
+
+      synchronizer = await createWsSynchronizer(getStore(), ws as never);
       await synchronizer.startSync();
-      if (closed) return;
+      if (closed) return void (await teardown());
+
       attempt = 0;
       onState('online');
 
-      socket.addEventListener('close', () => {
-        if (closed) return;
+      ws.addEventListener('close', () => {
+        if (closed || socket !== ws) return;
         onState('offline');
         schedule();
       });
     } catch {
       if (closed) return;
+      await teardown();
       onState('offline');
       schedule();
     }
@@ -132,8 +218,7 @@ export async function startSync(
   return () => {
     closed = true;
     clearTimeout(retry);
-    void synchronizer?.destroy();
-    socket?.close();
+    void teardown();
     onState('off');
   };
 }

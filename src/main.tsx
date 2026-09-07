@@ -6,6 +6,17 @@ import { writeSyncConfig } from './lib/sync';
 
 const inTauri = '__TAURI_INTERNALS__' in window;
 
+// The 44px of headroom in the sheet exists to clear macOS traffic lights.
+// Windows puts its controls top-right and needs none of it, so the stylesheet
+// is told which platform it is on rather than guessing from the viewport.
+if (inTauri) {
+  void import('@tauri-apps/plugin-os')
+    .then(({ platform }) => document.documentElement.setAttribute('data-platform', platform()))
+    .catch(() => document.documentElement.setAttribute('data-platform', 'macos'));
+} else {
+  document.documentElement.setAttribute('data-platform', 'web');
+}
+
 // Setting a phone up by typing a long key on a touch keyboard is miserable, so
 // a link can carry it instead. It is removed from the address bar immediately
 // afterwards so it does not sit in history or get shared by accident.

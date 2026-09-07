@@ -81,7 +81,7 @@ folder sits inside MEGA it's backed up and synced for free.
 Resolution order, if you want it elsewhere:
 
 1. `$TODO_DATA_DIR`
-2. `dataDir` in `~/Library/Application Support/com.shawon.todo/config.json`
+2. `dataDir` in `~/Library/Application Support/com.shawon.vault/config.json`
 3. `data/` next to this README
 
 ```bash

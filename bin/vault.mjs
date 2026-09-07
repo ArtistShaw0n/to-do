@@ -6,7 +6,7 @@
  *
  * Path resolution order:
  *   1. $TODO_DATA_DIR
- *   2. dataDir in ~/Library/Application Support/com.shawon.todo/config.json
+ *   2. dataDir in ~/Library/Application Support/com.shawon.vault/config.json
  *   3. <repo>/data
  */
 
@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const APP_SUPPORT = join(homedir(), 'Library', 'Application Support', 'com.shawon.todo');
+const APP_SUPPORT = join(homedir(), 'Library', 'Application Support', 'com.shawon.vault');
 
 export const SCHEMA_VERSION = 1;
 

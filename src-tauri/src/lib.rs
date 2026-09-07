@@ -19,7 +19,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 
-const APP_ID: &str = "com.shawon.todo";
+const APP_ID: &str = "com.shawon.vault";
 
 /// Tracks the `meta.updatedAt` value of our own most recent write, so the file
 /// watcher can tell an external edit (Claude, the CLI, MEGA sync) apart from

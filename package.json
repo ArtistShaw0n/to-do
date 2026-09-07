@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && tsc -p worker --noEmit && vite build",
+    "build": "tsc --noEmit && tsc -p worker --noEmit && vite build --config vite.cli.config.ts && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "app:dev": "tauri dev",
@@ -18,7 +18,9 @@
     "sync:dev": "wrangler dev --port 8787 --local",
     "sync:deploy": "wrangler deploy",
     "test:sync": "vite build --config vite.test.config.ts && node .test-out/sync.mjs",
-    "test:store": "vite build --config vite.test.config.ts --mode store && node .test-out/store.mjs"
+    "test:store": "vite build --config vite.test.config.ts --mode store && node .test-out/store.mjs",
+    "build:cli": "vite build --config vite.cli.config.ts",
+    "check:generated": "vite build --config vite.cli.config.ts && git diff --exit-code --stat bin/lib/store.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

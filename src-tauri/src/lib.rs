@@ -292,8 +292,17 @@ async fn normalise_task(prompt: String) -> Result<String, String> {
 
         let out = child.wait_with_output().map_err(|e| e.to_string())?;
         if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            let msg = err.trim().lines().next().unwrap_or("claude failed");
+            // A lapsed login exits 1 and prints to stdout, leaving stderr empty,
+            // so reading only stderr would report "claude failed" and throw the
+            // one line that says why away.
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let msg = stderr
+                .lines()
+                .chain(stdout.lines())
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("claude exited without explaining why");
             return Err(msg.to_string());
         }
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())

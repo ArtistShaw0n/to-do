@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NOTE_KIND_META, type Note, type Task } from './lib/types';
-import { isOverdue, relativeDue } from './lib/dates';
+import { isOverdue, longDate, parseDateInput, relativeDue } from './lib/dates';
 import {
   addNote, addTask, deleteNote, deleteTask, isOpen, projectColor,
   searchNotes, sortNotes, sortTasks, toggleDone, updateNote, updateTask,
 } from './lib/vault';
 import { useVault } from './lib/useVault';
-import { EmptyDetail, NoteDetail, TaskDetail } from './components/DetailPane';
-import {
-  CheckGlyph, NoteGlyph, PlusGlyph, SearchGlyph, SortGlyph, ViewGlyph,
-  type ViewGlyphName,
-} from './components/glyphs';
+import { NoteDetail, TaskDetail } from './components/DetailPane';
+import { CheckGlyph, NoteGlyph, ViewGlyph, type ViewGlyphName } from './components/glyphs';
 
 type ThemeMode = 'system' | 'light' | 'dark';
 const THEME_ORDER: ThemeMode[] = ['system', 'light', 'dark'];
@@ -31,9 +28,7 @@ const CATEGORIES: { view: View; label: string; glyph: ViewGlyphName; color: stri
 export default function App() {
   const { vault, error, mutate } = useVault();
   const [view, setView] = useState<View>('all');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [newest, setNewest] = useState(true);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [update, setUpdate] = useState<{ version: string; install: () => Promise<void> } | null>(null);
 
   const [theme, setTheme] = useState<ThemeMode>(
@@ -93,73 +88,47 @@ export default function App() {
     } as Record<View, number>;
   }, [vault]);
 
-  /** The middle column's contents for the current category. */
   const items = useMemo<(Task | Note)[]>(() => {
     if (!vault) return [];
-
-    if (view === 'notes') {
-      const found = sortNotes(searchNotes(vault.notes, query));
-      return newest ? found : [...found].reverse();
-    }
+    if (view === 'notes') return sortNotes(searchNotes(vault.notes, ''));
 
     const live = vault.tasks.filter(isOpen);
-    let scoped: Task[];
     switch (view) {
-      case 'personal': scoped = live.filter((t) => t.project === PERSONAL); break;
-      case 'bugs': scoped = live.filter((t) => t.tags.includes('bug')); break;
-      case 'done': scoped = vault.tasks.filter((t) => !isOpen(t)); break;
-      default: scoped = live;
+      case 'personal': return sortTasks(live.filter((t) => t.project === PERSONAL));
+      case 'bugs': return sortTasks(live.filter((t) => t.tags.includes('bug')));
+      case 'done':
+        return vault.tasks
+          .filter((t) => !isOpen(t))
+          .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''));
+      default: return sortTasks(live);
     }
-
-    const q = query.trim().toLowerCase();
-    if (q) {
-      scoped = scoped.filter((t) =>
-        `${t.title} ${t.notes ?? ''} ${t.tags.join(' ')} ${t.project ?? ''}`
-          .toLowerCase()
-          .includes(q),
-      );
-    }
-
-    const ordered = view === 'done'
-      ? [...scoped].sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
-      : sortTasks(scoped);
-    return newest ? ordered : [...ordered].reverse();
-  }, [vault, view, query, newest]);
-
-  const selected = useMemo(() => {
-    if (!vault || !selectedId) return null;
-    return (
-      vault.notes.find((n) => n.id === selectedId)
-      ?? vault.tasks.find((t) => t.id === selectedId)
-      ?? null
-    );
-  }, [vault, selectedId]);
-
-  // "+" creates an item that already belongs to the category you are in.
-  const addHere = () => {
-    if (view === 'notes') {
-      void mutate((v) => addNote(v, { title: 'New note' }));
-    } else {
-      void mutate((v) => addTask(v, {
-        title: 'New task',
-        ...(view === 'personal' ? { project: PERSONAL } : {}),
-        ...(view === 'bugs' ? { tags: ['bug'] } : {}),
-      }));
-    }
-  };
+  }, [vault, view]);
 
   if (error && !vault) {
     return (
-      <div className="detail-empty" style={{ height: '100%' }}>
-        <div className="detail-empty-title">Could not open the vault</div>
-        <div className="detail-empty-sub" style={{ maxWidth: 340 }}>{error}</div>
+      <div className="empty" style={{ height: '100%' }}>
+        <div className="empty-title">Could not open the vault</div>
+        <div style={{ maxWidth: 340 }}>{error}</div>
       </div>
     );
   }
   if (!vault) return <div style={{ height: '100%' }} />;
 
-  const label = CATEGORIES.find((c) => c.view === view)?.label ?? 'All';
   const themeLabel = theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark';
+
+  /** Anything typed in belongs to the category that is open. */
+  const add = (title: string, due?: string) => {
+    if (view === 'notes') {
+      void mutate((v) => addNote(v, { title }));
+      return;
+    }
+    void mutate((v) => addTask(v, {
+      title,
+      ...(due ? { due } : {}),
+      ...(view === 'personal' ? { project: PERSONAL } : {}),
+      ...(view === 'bugs' ? { tags: ['bug'] } : {}),
+    }));
+  };
 
   return (
     <>
@@ -167,155 +136,108 @@ export default function App() {
         <span /><span /><span /><span />
       </div>
 
-      <div className="shell">
-        {/* Categories */}
-        <aside className="sidebar" data-tauri-drag-region>
-          <div className="tile-grid">
-            {CATEGORIES.map((c) => (
-              <button
-                key={c.view}
-                className="tile"
-                aria-current={view === c.view}
-                style={{ '--tile': c.color } as React.CSSProperties}
-                onClick={() => {
-                  setView(c.view);
-                  setSelectedId(null);
-                  setQuery('');
-                }}
-              >
-                <span className="tile-top">
-                  <span className="tile-icon"><ViewGlyph name={c.glyph} size={15} /></span>
-                  <span className="tile-count">{counts[c.view] ?? 0}</span>
-                </span>
-                <span className="tile-label">{c.label}</span>
-              </button>
-            ))}
+      <div className="drag-strip" data-tauri-drag-region />
+
+      <main className="sheet">
+        <header className="sheet-head">
+          <div>
+            <h1 className="sheet-title">
+              {CATEGORIES.find((c) => c.view === view)?.label ?? 'Tasks'}
+            </h1>
+            <p className="sheet-date">{longDate()}</p>
           </div>
 
-          <div className="sidebar-foot">
-            <button
-              className="theme-btn"
-              title={`Appearance: ${themeLabel}`}
-              aria-label={`Appearance: ${themeLabel}. Click to change.`}
-              onClick={() =>
-                setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length])
-              }
-            >
-              {theme === 'light' ? (
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <circle cx="8" cy="8" r="3.1" />
-                  <path d="M8 1.4v1.5M8 13.1v1.5M1.4 8h1.5M13.1 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1" />
-                </svg>
-              ) : theme === 'dark' ? (
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M13.2 9.6A5.8 5.8 0 016.4 2.8a5.9 5.9 0 106.8 6.8z" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <circle cx="8" cy="8" r="6.1" />
-                  <path d="M8 1.9a6.1 6.1 0 000 12.2z" fill="currentColor" stroke="none" />
-                </svg>
-              )}
-            </button>
-          </div>
-        </aside>
-
-        {/* List */}
-        <section className="list-col">
-          <header className="col-head" data-tauri-drag-region>
-            <div className="col-title">
-              {label}
-              <span className="col-sub">
-                {items.length} {items.length === 1 ? 'item' : 'items'}
-              </span>
-            </div>
-            <button
-              className="icon-btn"
-              title={newest ? 'Newest first' : 'Oldest first'}
-              aria-label={newest ? 'Newest first' : 'Oldest first'}
-              onClick={() => setNewest((n) => !n)}
-            >
-              <SortGlyph />
-            </button>
-            <button className="icon-btn" title="Add" aria-label="Add" onClick={addHere}>
-              <PlusGlyph />
-            </button>
-          </header>
-
-          <div className="list-scroll">
-            {items.length === 0 ? (
-              <div className="list-empty">{query ? 'No matches' : 'Nothing here'}</div>
+          <button
+            className="theme-btn"
+            title={`Appearance: ${themeLabel}`}
+            aria-label={`Appearance: ${themeLabel}. Click to change.`}
+            onClick={() =>
+              setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length])
+            }
+          >
+            {theme === 'light' ? (
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="8" r="3.1" />
+                <path d="M8 1.4v1.5M8 13.1v1.5M1.4 8h1.5M13.1 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1" />
+              </svg>
+            ) : theme === 'dark' ? (
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M13.2 9.6A5.8 5.8 0 016.4 2.8a5.9 5.9 0 106.8 6.8z" />
+              </svg>
             ) : (
-              items.map((item) =>
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="8" r="6.1" />
+                <path d="M8 1.9a6.1 6.1 0 000 12.2z" fill="currentColor" stroke="none" />
+              </svg>
+            )}
+          </button>
+        </header>
+
+        <div className="tile-row">
+          {CATEGORIES.map((c) => (
+            <button
+              key={c.view}
+              className="tile"
+              aria-current={view === c.view}
+              style={{ '--tile': c.color } as React.CSSProperties}
+              onClick={() => {
+                setView(c.view);
+                setOpenId(null);
+              }}
+            >
+              <span className="tile-top">
+                <span className="tile-icon"><ViewGlyph name={c.glyph} size={14} /></span>
+                <span className="tile-count">{counts[c.view] ?? 0}</span>
+              </span>
+              <span className="tile-label">{c.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="sheet-scroll" onClick={() => setOpenId(null)}>
+          {items.length === 0 ? (
+            <div className="empty">
+              <div className="empty-mark">✓</div>
+              <div className="empty-title">Nothing here</div>
+              <div>Add one below.</div>
+            </div>
+          ) : (
+            <div className="card-stack">
+              {items.map((item) =>
                 'kind' in item ? (
-                  <NoteListRow
+                  <NoteCard
                     key={item.id}
                     note={item}
-                    selected={item.id === selectedId}
-                    onSelect={() => setSelectedId(item.id)}
+                    open={openId === item.id}
+                    onOpen={() => setOpenId(item.id)}
+                    onPatch={(patch) => void mutate((v) => updateNote(v, item.id, patch))}
+                    onDelete={() => {
+                      void mutate((v) => deleteNote(v, item.id));
+                      setOpenId(null);
+                    }}
                   />
                 ) : (
-                  <TaskListRow
+                  <TaskCard
                     key={item.id}
                     task={item}
-                    color={projectColor(vault, item.project)}
-                    selected={item.id === selectedId}
-                    onSelect={() => setSelectedId(item.id)}
+                    vault={vault}
+                    open={openId === item.id}
+                    onOpen={() => setOpenId(item.id)}
                     onToggle={() => void mutate((v) => toggleDone(v, item.id))}
+                    onPatch={(patch) => void mutate((v) => updateTask(v, item.id, patch))}
+                    onDelete={() => {
+                      void mutate((v) => deleteTask(v, item.id));
+                      setOpenId(null);
+                    }}
                   />
                 ),
-              )
-            )}
-          </div>
-        </section>
-
-        {/* Detail */}
-        <section className="detail-col">
-          <header className="col-head detail-head-bar" data-tauri-drag-region>
-            <div className="search-field">
-              <SearchGlyph />
-              <input
-                value={query}
-                placeholder="Search"
-                spellCheck={false}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    setQuery('');
-                    e.currentTarget.blur();
-                  }
-                }}
-              />
+              )}
             </div>
-          </header>
+          )}
+        </div>
 
-          <div className="detail-scroll">
-            {!selected ? (
-              <EmptyDetail />
-            ) : 'kind' in selected ? (
-              <NoteDetail
-                note={selected}
-                onPatch={(patch) => void mutate((v) => updateNote(v, selected.id, patch))}
-                onDelete={() => {
-                  void mutate((v) => deleteNote(v, selected.id));
-                  setSelectedId(null);
-                }}
-              />
-            ) : (
-              <TaskDetail
-                task={selected}
-                vault={vault}
-                onPatch={(patch) => void mutate((v) => updateTask(v, selected.id, patch))}
-                onToggle={() => void mutate((v) => toggleDone(v, selected.id))}
-                onDelete={() => {
-                  void mutate((v) => deleteTask(v, selected.id));
-                  setSelectedId(null);
-                }}
-              />
-            )}
-          </div>
-        </section>
-      </div>
+        {view !== 'done' && <Composer noun={view === 'notes' ? 'note' : 'task'} onAdd={add} />}
+      </main>
 
       {update && (
         <div className="toast">
@@ -327,72 +249,134 @@ export default function App() {
   );
 }
 
-// List rows ──────────────────────────────────────────────────────────────────
+// Cards ──────────────────────────────────────────────────────────────────────
 
-function TaskListRow({
-  task,
-  color,
-  selected,
-  onSelect,
-  onToggle,
+function TaskCard({
+  task, vault, open, onOpen, onToggle, onPatch, onDelete,
 }: {
   task: Task;
-  color: string;
-  selected: boolean;
-  onSelect: () => void;
+  vault: Parameters<typeof TaskDetail>[0]['vault'];
+  open: boolean;
+  onOpen: () => void;
   onToggle: () => void;
+  onPatch: (patch: Partial<Task>) => void;
+  onDelete: () => void;
 }) {
   const done = task.status === 'done' || task.status === 'cancelled';
   const due = relativeDue(task.due);
   const late = !done && isOverdue(task.due);
-  const subtitle = task.project ?? task.notes ?? '';
+  const color = projectColor(vault, task.project);
 
   return (
-    <div className="row" data-selected={selected} data-done={done} onClick={onSelect}>
-      <button
-        className="check"
-        data-done={done}
-        aria-label={done ? `Reopen ${task.title}` : `Complete ${task.title}`}
-        onClick={(e) => {
-          e.stopPropagation(); // the row itself only selects
-          onToggle();
-        }}
-      >
-        <CheckGlyph />
-      </button>
+    <div className="card" data-open={open} data-done={done} onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+      <div className="card-row">
+        <button
+          className="check"
+          data-done={done}
+          aria-label={done ? `Reopen ${task.title}` : `Complete ${task.title}`}
+          onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        >
+          <CheckGlyph />
+        </button>
 
-      <div className="row-main">
-        <div className="row-title">{task.title}</div>
-        <div className="row-sub">
-          {task.project && <span className="row-dot" style={{ background: color }} />}
-          <span className="row-sub-text">{subtitle}</span>
-          {due && !done && <span className="row-due" data-late={late}>{due}</span>}
+        <div className="card-main">
+          <div className="card-title">{task.title}</div>
+          {task.notes && !done && <div className="card-notes">{task.notes}</div>}
+          {(task.project || task.tags.length > 0) && !done && (
+            <div className="card-meta">
+              {task.project && (
+                <span className="chip" style={{ '--chip': color } as React.CSSProperties}>
+                  <span className="chip-dot" />{task.project}
+                </span>
+              )}
+              {task.tags.map((t) => <span key={t} className="chip chip-tag">{t}</span>)}
+            </div>
+          )}
         </div>
+
+        {due && !done && <span className="card-due" data-late={late}>{due}</span>}
       </div>
+
+      {open && (
+        <div className="card-open" onClick={(e) => e.stopPropagation()}>
+          <TaskDetail task={task} vault={vault} onPatch={onPatch} onToggle={onToggle} onDelete={onDelete} />
+        </div>
+      )}
     </div>
   );
 }
 
-function NoteListRow({
-  note,
-  selected,
-  onSelect,
+function NoteCard({
+  note, open, onOpen, onPatch, onDelete,
 }: {
   note: Note;
-  selected: boolean;
-  onSelect: () => void;
+  open: boolean;
+  onOpen: () => void;
+  onPatch: (patch: Partial<Note>) => void;
+  onDelete: () => void;
 }) {
   const meta = NOTE_KIND_META[note.kind];
   const subtitle = note.username || note.url || note.body.split('\n')[0] || meta.label;
 
   return (
-    <div className="row" data-selected={selected} onClick={onSelect}>
-      <span className="note-badge" style={{ '--kind': meta.color } as React.CSSProperties}>
-        <NoteGlyph kind={note.kind} size={15} />
-      </span>
-      <div className="row-main">
-        <div className="row-title">{note.title}</div>
-        <div className="row-sub"><span className="row-sub-text">{subtitle}</span></div>
+    <div className="card" data-open={open} onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+      <div className="card-row">
+        <span className="note-badge" style={{ '--kind': meta.color } as React.CSSProperties}>
+          <NoteGlyph kind={note.kind} size={15} />
+        </span>
+        <div className="card-main">
+          <div className="card-title">{note.title}</div>
+          <div className="card-notes">{subtitle}</div>
+        </div>
+      </div>
+
+      {open && (
+        <div className="card-open" onClick={(e) => e.stopPropagation()}>
+          <NoteDetail note={note} onPatch={onPatch} onDelete={onDelete} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Composer ───────────────────────────────────────────────────────────────────
+
+function Composer({ noun, onAdd }: { noun: string; onAdd: (title: string, due?: string) => void }) {
+  const [value, setValue] = useState('');
+
+  const submit = () => {
+    const words = value.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return;
+
+    // A trailing date word becomes the due date — the one attribute the card
+    // shows without opening it.
+    let due: string | undefined;
+    for (let take = Math.min(2, words.length); take >= 1; take -= 1) {
+      if (take >= words.length) continue;
+      const parsed = parseDateInput(words.slice(-take).join(' '));
+      if (parsed) { due = parsed; words.splice(-take, take); break; }
+    }
+
+    const title = words.join(' ').trim();
+    if (!title) return;
+    onAdd(title, due);
+    setValue('');
+  };
+
+  return (
+    <div className="composer" onClick={(e) => e.stopPropagation()}>
+      <div className="composer-shell">
+        <input
+          value={value}
+          placeholder={`Add a ${noun}…`}
+          spellCheck={false}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+            else if (e.key === 'Escape') { setValue(''); e.currentTarget.blur(); }
+          }}
+        />
+        <span className="composer-hint">⏎</span>
       </div>
     </div>
   );

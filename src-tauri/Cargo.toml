@@ -1,6 +1,6 @@
 [package]
 name = "todo"
-version = "0.18.2"
+version = "0.18.3"
 description = "To-Do — a Liquid Glass task manager for macOS"
 authors = ["Shawon"]
 edition = "2021"

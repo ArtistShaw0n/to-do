@@ -13,6 +13,7 @@ import {
 import { useVault } from './lib/useVault';
 import { NoteDetail, TaskDetail } from './components/DetailPane';
 import { CheckGlyph, NoteGlyph, ViewGlyph, type ViewGlyphName } from './components/glyphs';
+import { SyncBadge, SyncSetup, hasSyncConfig } from './components/SyncSetup';
 
 type ThemeMode = 'system' | 'light' | 'dark';
 const THEME_ORDER: ThemeMode[] = ['system', 'light', 'dark'];
@@ -31,7 +32,13 @@ const CATEGORIES: { view: View; label: string; glyph: ViewGlyphName; color: stri
 ];
 
 export default function App() {
-  const { vault, error, mutate } = useVault();
+  const { vault, error, sync, mutate } = useVault();
+
+  // A Mac reads the hub from the config file the CLI writes. A phone has no
+  // such file, so it has to be told once — and until it is, it has no vault to
+  // show and nowhere to put anything typed into it.
+  const inTauri = '__TAURI_INTERNALS__' in window;
+  const [configured] = useState(() => inTauri || !!hasSyncConfig());
   const [view, setView] = useState<View>('all');
   const [openId, setOpenId] = useState<string | null>(null);
   const [update, setUpdate] = useState<{ version: string; install: () => Promise<void> } | null>(null);
@@ -120,6 +127,7 @@ export default function App() {
       </div>
     );
   }
+  if (!configured) return <SyncSetup onDone={() => window.location.reload()} />;
   if (!vault) return <div style={{ height: '100%' }} />;
 
   const themeLabel = theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark';
@@ -205,6 +213,7 @@ export default function App() {
       <div className="drag-strip" data-tauri-drag-region />
 
       <main className="sheet">
+        <SyncBadge state={sync} />
         <header className="sheet-head">
           <div>
             <h1 className="sheet-title">

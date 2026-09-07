@@ -62,6 +62,107 @@ export function writeAppConfig(dataDir = resolveDataDir()) {
   return target;
 }
 
+// ── The sync hub ──────────────────────────────────────────────────────────────
+
+/**
+ * Where the shared vault lives, if one is configured.
+ *
+ * With no hub the CLI keeps working exactly as it always has, against the local
+ * JSON file. That matters: Claude runs this constantly, and a missing config
+ * should mean "no other devices yet", not "broken".
+ */
+export function readSyncConfig() {
+  if (process.env.TODO_SYNC_URL && process.env.TODO_SYNC_KEY) {
+    return { url: process.env.TODO_SYNC_URL, key: process.env.TODO_SYNC_KEY };
+  }
+  const cfgPath = join(APP_SUPPORT, 'config.json');
+  if (!existsSync(cfgPath)) return null;
+  try {
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    return cfg.syncUrl && cfg.syncKey ? { url: cfg.syncUrl, key: cfg.syncKey } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearSyncConfig() {
+  const target = join(APP_SUPPORT, 'config.json');
+  if (!existsSync(target)) return target;
+  let cfg = {};
+  try { cfg = JSON.parse(readFileSync(target, 'utf8')); } catch { cfg = {}; }
+  delete cfg.syncUrl;
+  delete cfg.syncKey;
+  atomicWrite(target, JSON.stringify({ ...cfg, updatedAt: nowISO() }, null, 2));
+  return target;
+}
+
+export function writeSyncConfig({ url, key }) {
+  mkdirSync(APP_SUPPORT, { recursive: true });
+  const target = join(APP_SUPPORT, 'config.json');
+  let cfg = {};
+  if (existsSync(target)) {
+    try { cfg = JSON.parse(readFileSync(target, 'utf8')); } catch { cfg = {}; }
+  }
+  atomicWrite(target, JSON.stringify(
+    { ...cfg, syncUrl: url, syncKey: key, updatedAt: nowISO() }, null, 2));
+  return target;
+}
+
+/**
+ * A command's connection to the hub.
+ *
+ * The CLI is a short-lived process, so it connects, pulls the vault into
+ * memory, lets the command work against it synchronously — which is what all
+ * 28 call sites already expect — and pushes on the way out.
+ */
+let session = null;
+
+export async function openSession({ quiet = false } = {}) {
+  const config = readSyncConfig();
+  if (!config) return null;
+
+  const { createMergeableStore, createWsSynchronizer, storeToVault, applyVaultToStore } =
+    await import('./lib/store.mjs');
+
+  const store = createMergeableStore('cli');
+  const socket = new WebSocket(`${config.url.replace(/\/$/, '')}/sync/${config.key}`);
+
+  const opened = new Promise((res, rej) => {
+    socket.addEventListener('open', res, { once: true });
+    socket.addEventListener('error', () => rej(new Error('could not reach the sync hub')), { once: true });
+    setTimeout(() => rej(new Error('sync hub did not answer in time')), 10_000);
+  });
+
+  try {
+    await opened;
+    const synchronizer = await createWsSynchronizer(store, socket);
+    await synchronizer.startSync();
+    // Give the hub a moment to send what this process does not have yet.
+    await new Promise((r) => setTimeout(r, 600));
+    session = { store, synchronizer, socket, storeToVault, applyVaultToStore, dirty: false };
+    return session;
+  } catch (err) {
+    try { socket.close(); } catch { /* already closing */ }
+    if (!quiet) {
+      // Falling back to the file is right — the alternative is refusing to
+      // record a task because a server is unreachable — but it must be said
+      // out loud, or edits pile up locally and never reach the other devices.
+      process.stderr.write(`! ${err.message}; using the local file instead\n`);
+    }
+    return null;
+  }
+}
+
+export async function closeSession() {
+  if (!session) return;
+  const { synchronizer, socket, dirty } = session;
+  // Let the last write reach the hub before the process exits.
+  if (dirty) await new Promise((r) => setTimeout(r, 700));
+  try { await synchronizer.destroy(); } catch { /* closing anyway */ }
+  try { socket.close(); } catch { /* already closed */ }
+  session = null;
+}
+
 // ── Low-level IO ──────────────────────────────────────────────────────────────
 
 function atomicWrite(file, contents) {
@@ -83,6 +184,8 @@ export function emptyVault() {
 }
 
 export function loadVault() {
+  if (session) return migrate(session.storeToVault(session.store));
+
   const file = vaultPath();
   if (!existsSync(file)) {
     const fresh = emptyVault();
@@ -108,6 +211,15 @@ export function saveVault(vault) {
   vault.meta = vault.meta || {};
   vault.meta.updatedAt = nowISO();
   vault.version = SCHEMA_VERSION;
+
+  if (session) {
+    // Only the rows that changed are written, so a task edited here does not
+    // shout down an edit made on another device to a different task.
+    session.applyVaultToStore(session.store, vault);
+    session.dirty = true;
+    return vault;
+  }
+
   atomicWrite(vaultPath(), `${JSON.stringify(vault, null, 2)}\n`);
   return vault;
 }

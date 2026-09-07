@@ -9,29 +9,39 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc -p worker --noEmit && vite build --config vite.cli.config.ts && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "app:dev": "tauri dev",
     "app:build": "tauri build",
-    "todo": "node bin/todo.mjs"
+    "todo": "node bin/todo.mjs",
+    "sync:dev": "wrangler dev --port 8787 --local",
+    "sync:deploy": "wrangler deploy",
+    "test:sync": "vite build --config vite.test.config.ts && node .test-out/sync.mjs",
+    "test:store": "vite build --config vite.test.config.ts --mode store && node .test-out/store.mjs",
+    "build:cli": "vite build --config vite.cli.config.ts",
+    "check:generated": "vite build --config vite.cli.config.ts && git diff --exit-code --stat bin/lib/store.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-global-shortcut": "^2.3.0",
     "@tauri-apps/plugin-notification": "^2.3.1",
     "@tauri-apps/plugin-opener": "^2.5.0",
+    "@tauri-apps/plugin-os": "^2.3.2",
     "@tauri-apps/plugin-process": "^2.3.0",
     "@tauri-apps/plugin-updater": "^2.9.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "tinybase": "^9.7.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260906.1",
     "@tauri-apps/cli": "^2.9.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.1",
     "@vitejs/plugin-react": "^5.0.4",
     "typescript": "^5.9.3",
-    "vite": "^7.1.9"
+    "vite": "^7.1.9",
+    "wrangler": "^4.129.0"
   }
 }

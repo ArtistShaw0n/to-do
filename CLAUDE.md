@@ -245,6 +245,9 @@ node bin/todo.mjs digest --json | grep '"author"'   # "auto" means write a prope
 ## 4. CLI reference
 
 ```
+sync [<url> <key>]            point this machine at the hub
+sync --off                    go back to the local file only
+
 add <title>       --p 0-3  --due X  --tag a,b  --project X  --notes X
                   --sub "a,b"  --repeat daily|weekdays|weekly|biweekly|monthly
                   --raw "<his original words>"   --est <minutes>
@@ -278,8 +281,15 @@ Claude Code ──▶ bin/todo.mjs ──▶ data/tasks.json ◀── Rust fs-w
                                  (inside MEGA → free backup + sync)
 ```
 
-- **`data/tasks.json` is the single source of truth.** Gitignored — the repo is
-  public, his tasks are not.
+- **The vault is a TinyBase store**, one row per task, note and project. With a
+  hub configured (`todo sync`) every device — both Macs, both phones, and this
+  CLI — shares it and merges automatically. With no hub the CLI falls back to
+  `data/tasks.json`, which is right for one machine.
+- **`data/tasks.json`** is gitignored either way — the repo is public, his tasks
+  are not.
+- The CLI connects to the hub, pulls into memory, runs the command
+  synchronously, and pushes on the way out. If the hub is unreachable it says so
+  and uses the local file, rather than refusing to record a task.
 - **Rust owns storage**, file-watching and native chrome. **TypeScript owns all
   task logic.** `bin/vault.mjs` is the CLI's own copy of that logic.
 - The schema in `src/lib/types.ts` is a **contract shared by three

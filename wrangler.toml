@@ -1,0 +1,27 @@
+# The sync hub. See worker/index.ts.
+#
+# Deploying needs a (free) Cloudflare account; `wrangler dev` runs the whole
+# thing locally without one, which is how it is tested here.
+
+name = "todo-sync"
+main = "worker/index.ts"
+compatibility_date = "2026-09-01"
+
+[[durable_objects.bindings]]
+name = "TODO_SYNC"
+class_name = "TodoSync"
+
+# Durable Objects have to be declared in a migration before they can be used.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TodoSync"]
+
+# The Worker serves the app as well as syncing it, so the phones need no
+# separate hosting: one deployment, one address, one thing to keep alive.
+[assets]
+directory = "dist"
+not_found_handling = "single-page-application"
+binding = "ASSETS"
+
+[observability]
+enabled = true

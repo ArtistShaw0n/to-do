@@ -37,7 +37,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -45,7 +48,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "copyright": "© Shawon",
+    "copyright": "\u00a9 Shawon",
     "category": "Productivity",
     "shortDescription": "Liquid Glass task manager",
     "longDescription": "To-Do is a minimal, colourful task manager for macOS, driven from Claude Code.",

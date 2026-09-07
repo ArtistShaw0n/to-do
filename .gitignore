@@ -41,3 +41,8 @@ Icon[\r]
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Local Worker secrets — never committed.
+.dev.vars
+.wrangler/
+.test-out/

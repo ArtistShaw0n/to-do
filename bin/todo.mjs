@@ -15,6 +15,7 @@
 import {
   PRIORITY_LABELS, STATUSES, computeStats, ensureProject, findTask,
   loadVault, newId, nowISO, parseDate, saveVault, todayISO, vaultPath, writeAppConfig,
+  openSession, closeSession, readSyncConfig, writeSyncConfig, clearSyncConfig,
 } from './vault.mjs';
 
 // Piping into `head`/`less` closes stdout early. Without this, Node raises an
@@ -675,6 +676,44 @@ commands.projects = (_positional, flags) => {
 
 commands.path = () => process.stdout.write(`${vaultPath()}\n`);
 
+/**
+ * Point this machine at the sync hub, or report where it is pointed.
+ *
+ * Without this the CLI works against the local file alone — right for one
+ * machine, silently wrong for four.
+ */
+commands.sync = (positional, flags) => {
+  const [url, key] = positional;
+
+  if (flags.off) {
+    const target = clearSyncConfig();
+    console.log(`${green('OK')} disconnected — this machine is back on its local file`);
+    console.log(dim(`  ${target}`));
+    return;
+  }
+
+  if (!url) {
+    const current = readSyncConfig();
+    if (!current) {
+      console.log(`${dim('not connected')} — this machine uses the local file only`);
+      console.log(dim('  connect with:  todo sync wss://<your-worker>.workers.dev <key>'));
+      return;
+    }
+    const masked = `${current.key.slice(0, 4)}${'.'.repeat(Math.max(0, current.key.length - 8))}${current.key.slice(-4)}`;
+    console.log(`${bold('hub')}  ${current.url}`);
+    console.log(`${dim('key')}  ${masked}`);
+    return;
+  }
+
+  if (!key) die('a key is required: todo sync <url> <key>');
+  if (!/^wss?:\/\//.test(url)) die('the url must start with wss:// (ws:// only for local testing)');
+
+  const target = writeSyncConfig({ url, key });
+  console.log(`${green('OK')} this machine now syncs with ${url}`);
+  console.log(dim(`  ${target}`));
+  if (flags.push) console.log(dim('  run any command to push the local vault up'));
+};
+
 commands.init = () => {
   loadVault(); // creates the vault file if missing
   const cfg = writeAppConfig();
@@ -736,6 +775,8 @@ ${bold('Notes')} ${dim('— reference material, never completed')}
 ${bold('Utility')}
   init                 create vault + app config
   path                 print vault location
+  sync [<url> <key>]   connect this machine to the sync hub, or show it
+  sync --off           go back to the local file only
   export [--md]        dump everything
 
 ${dim('Dates accept: today, tomorrow, kal, mon..sun, +3d, 2w, 2026-08-20, 20/08')}
@@ -751,8 +792,16 @@ if (command === '--help' || command === '-h') { commands.help(); process.exit(0)
 if (!commands[command]) die(`unknown command "${command}" — run \`todo help\``);
 
 const { positional, flags } = parseArgs(rest);
+
+// Commands that never touch the vault should not pay for a network round trip,
+// and `help` in particular must work with no config and no connectivity.
+const OFFLINE_COMMANDS = new Set(['help', 'path', 'init', 'sync']);
+
 try {
+  if (!OFFLINE_COMMANDS.has(command)) await openSession();
   commands[command](positional, flags);
+  await closeSession();
 } catch (err) {
+  await closeSession();
   die(err.message);
 }

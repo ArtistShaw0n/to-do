@@ -13,9 +13,20 @@ permissions:
 
 jobs:
   release:
-    # macOS 14+ runners are Apple Silicon; both targets are added explicitly
-    # below so the bundle is universal.
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS 14+ runners are Apple Silicon; both targets are named so the
+          # bundle is universal.
+          - os: macos-latest
+            args: '--target universal-apple-darwin'
+            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+          - os: windows-latest
+            args: '--bundles nsis'
+            rust-targets: ''
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v5
@@ -31,7 +42,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: ${{ matrix.rust-targets }}
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -48,13 +59,17 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'To-Do ${{ github.ref_name }}'
           releaseBody: |
-            Download `To-Do_universal.dmg`, drag it to Applications.
+            **macOS** — download `To-Do_universal.dmg` and drag it to Applications.
+            **Windows** — download the `.exe` installer.
 
-            To-Do is not notarised with an Apple Developer ID, so the first
-            launch needs **right-click → Open** (or `xattr -cr /Applications/To-Do.app`).
-            Later updates install silently.
+            To-Do is signed for updates but not notarised with an Apple Developer
+            ID, so the first launch on macOS needs **right-click → Open** (or
+            `xattr -cr /Applications/To-Do.app`). Later updates install silently.
+
+            Phones do not need an install from here: open the hub's address in
+            the browser and add it to the home screen.
           releaseDraft: false
           prerelease: false
-          args: --target universal-apple-darwin
+          args: ${{ matrix.args }}
           # Produces latest.json, which the updater endpoint points at.
           includeUpdaterJson: true

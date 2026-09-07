@@ -249,3 +249,72 @@ export function storeToVault(store: MergeableStore): Vault {
     },
   };
 }
+
+// ── Writing a whole vault without touching every row ─────────────────────────
+
+/** Cell-by-cell equality; row objects are flat, so this is the whole test. */
+function sameRow(
+  a: Record<string, unknown> | undefined,
+  b: Record<string, string | number | boolean>,
+): boolean {
+  if (!a) return false;
+  const ak = Object.keys(a), bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  return bk.every((k) => a[k] === b[k]);
+}
+
+function syncTable(
+  store: MergeableStore,
+  table: string,
+  rows: Record<string, Record<string, string | number | boolean>>,
+): void {
+  const existing = store.getTable(table) as Record<string, Record<string, unknown>>;
+
+  for (const [id, row] of Object.entries(rows)) {
+    // Writing an unchanged row would stamp it as freshly edited, and a later
+    // merge would then prefer it over a genuine edit made on another device.
+    if (!sameRow(existing[id], row)) store.setRow(table, id, row);
+  }
+  for (const id of Object.keys(existing)) {
+    if (!(id in rows)) store.delRow(table, id);
+  }
+}
+
+/**
+ * Apply a whole `Vault` to the store, writing only what actually differs.
+ *
+ * The app's mutation API hands back a complete vault rather than a patch, which
+ * is the right shape for the UI but the wrong one for a store whose merging is
+ * per row: `setTable` would restamp every row on every keystroke, and the next
+ * merge would treat all of them as newer than another device's real edits. The
+ * point of moving off a single JSON document would be lost at the last step.
+ */
+export function applyVaultToStore(store: MergeableStore, vault: Vault): void {
+  store.transaction(() => {
+    syncTable(store, TABLES.tasks, Object.fromEntries(
+      vault.tasks.map((t) => [t.id, taskToRow(t)]),
+    ));
+    syncTable(store, TABLES.notes, Object.fromEntries(
+      vault.notes.map((n) => [n.id, noteToRow(n)]),
+    ));
+    syncTable(store, TABLES.projects, Object.fromEntries(
+      vault.projects.map((p) => [p.id, defined({
+        name: p.name, color: p.color, createdAt: p.createdAt,
+      })]),
+    ));
+    syncTable(store, TABLES.digests, Object.fromEntries(
+      vault.digests.map((d) => [d.date, defined({
+        markdown: d.markdown,
+        stats: JSON.stringify(d.stats),
+        createdAt: d.createdAt,
+        author: d.author,
+      })]),
+    ));
+    store.setValues(defined({
+      version: vault.version,
+      createdAt: vault.meta.createdAt,
+      updatedAt: vault.meta.updatedAt,
+      lastSeq: vault.meta.lastSeq,
+    }));
+  });
+}

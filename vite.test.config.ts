@@ -1,13 +1,18 @@
-/** Bundles the integration tests so they run under plain Node. */
+/** Bundles an integration test so it runs under plain Node. */
 import { defineConfig } from 'vite';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   build: {
-    lib: { entry: 'test/sync.ts', formats: ['es'], fileName: () => 'sync.mjs' },
+    lib: {
+      entry: mode === 'store' ? 'test/store.ts' : 'test/sync.ts',
+      formats: ['es'],
+      fileName: () => (mode === 'store' ? 'store.mjs' : 'sync.mjs'),
+    },
     outDir: '.test-out',
+    emptyOutDir: false,
     target: 'node22',
     minify: false,
     rollupOptions: { external: [/^node:/] },
   },
   logLevel: 'error',
-});
+}));

@@ -17,7 +17,8 @@
     "todo": "node bin/todo.mjs",
     "sync:dev": "wrangler dev --port 8787 --local",
     "sync:deploy": "wrangler deploy",
-    "test:sync": "vite build --config vite.test.config.ts && node .test-out/sync.mjs"
+    "test:sync": "vite build --config vite.test.config.ts && node .test-out/sync.mjs",
+    "test:store": "vite build --config vite.test.config.ts --mode store && node .test-out/store.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

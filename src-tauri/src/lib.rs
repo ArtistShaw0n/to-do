@@ -217,9 +217,11 @@ fn show_main_window(app: AppHandle) {
 
 // ── Normalising what the composer was given ──────────────────────────────────
 
-/// How long to let `claude` think before giving up. The composer has already
-/// shown the user a usable task by this point, so a timeout costs polish, not
-/// data — and a wedged subprocess must never wedge the app.
+/// How long to let `claude` think before giving up. Measured runs land at
+/// 14-16s, so this is roughly three times the real cost — generous on a slow
+/// day, still bounded. The composer has already shown the user a usable task by
+/// this point, so a timeout costs polish, not data, and a wedged subprocess
+/// must never wedge the app.
 const NORMALISE_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Locate the Claude Code CLI.
@@ -268,6 +270,20 @@ async fn normalise_task(prompt: String) -> Result<String, String> {
         let mut child = Command::new(&bin)
             .arg("-p")
             .arg(&prompt)
+            // Launch the app from a terminal that is itself inside a Claude Code
+            // session and it inherits that session's plumbing — most damagingly
+            // ANTHROPIC_BASE_URL, which points the CLI at a gateway its own
+            // credentials are not valid for. It then fails with a flatly
+            // misleading "OAuth access token has been revoked" while the login
+            // is in fact perfectly good. Hand the child a clean slate.
+            .env_remove("ANTHROPIC_BASE_URL")
+            .env_remove("ANTHROPIC_AUTH_TOKEN")
+            .env_remove("CLAUDECODE")
+            .env_remove("CLAUDE_CODE_ENTRYPOINT")
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .env_remove("CLAUDE_CODE_HOST_SESSION_ID")
+            .env_remove("CLAUDE_CODE_MESSAGING_SOCKET")
+            .env_remove("CLAUDE_CODE_MESSAGING_TOKEN")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

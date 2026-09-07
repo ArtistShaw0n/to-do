@@ -1,4 +1,4 @@
-//! To-Do — desktop shell.
+//! Vault — desktop shell.
 //!
 //! Rust owns storage, file-watching and native macOS chrome. All task logic
 //! lives in the TypeScript layer, which reads and writes the vault as one JSON
@@ -407,10 +407,10 @@ fn spawn_vault_watcher(app: AppHandle) {
 // ── App setup ────────────────────────────────────────────────────────────────
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open To-Do", true, Some("Cmd+Shift+K"))?;
+    let open = MenuItem::with_id(app, "open", "Open Vault", true, Some("Cmd+Shift+K"))?;
     let reveal = MenuItem::with_id(app, "reveal", "Reveal Vault in Finder…", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit To-Do", true, Some("Cmd+Q"))?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Vault", true, Some("Cmd+Q"))?;
     let menu = Menu::with_items(app, &[&open, &reveal, &sep, &quit])?;
 
     // A dedicated monochrome glyph — using the colourful app icon as a template
@@ -526,7 +526,7 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running To-Do");
+        .expect("error while running Vault");
 }
 
 #[cfg(desktop)]

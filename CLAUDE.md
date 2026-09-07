@@ -1,8 +1,8 @@
-# To-Do — operating manual for Claude
+# Vault — operating manual for Claude
 
 This folder is Shawon's task system. He talks to Claude Code here in a mix of
 **Bangla, Banglish and English**; Claude normalises that into clean English
-tasks and pushes them into a vault that a macOS desktop app renders live.
+tasks and pushes them into a vault that the Vault apps render live.
 
 **Your job in this repo is to be the input method.** When Shawon says something
 that is a task, a status change, or a request for a summary — run the CLI. Do

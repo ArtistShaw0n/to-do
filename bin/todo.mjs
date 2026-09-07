@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * To-Do CLI — the bridge between Claude Code and the desktop app.
+ * Vault CLI — the bridge between Claude Code and the apps.
  *
  * Claude never hand-edits the vault JSON; it calls this instead, so every
  * mutation is validated, timestamped and written atomically.
@@ -448,7 +448,7 @@ commands.stats = (_positional, flags) => {
   const s = computeStats(vault);
   if (flags.json) { process.stdout.write(`${JSON.stringify(s, null, 2)}\n`); return; }
   process.stdout.write(
-    `\n${bold('To-Do')} ${dim(s.date)}\n\n` +
+    `\n${bold('Vault')} ${dim(s.date)}\n\n` +
     `  ${cyan(String(s.doing).padStart(3))}  in progress\n` +
     `  ${String(s.open).padStart(3)}  open\n` +
     `  ${yellow(String(s.dueToday).padStart(3))}  due today\n` +
@@ -749,7 +749,7 @@ commands.export = (_positional, flags) => {
   const vault = loadVault();
   if (flags.md) {
     const open = sortTasks(vault.tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled'));
-    let out = `# To-Do — ${todayISO()}\n\n`;
+    let out = `# Vault — ${todayISO()}\n\n`;
     for (const t of open) {
       out += `- [ ] ${t.title}`;
       const meta = [t.project && `#${t.project}`, t.due && `due ${t.due}`, t.priority <= 1 && `P${t.priority}`]
@@ -764,7 +764,7 @@ commands.export = (_positional, flags) => {
 
 commands.help = () => {
   process.stdout.write(`
-${bold('To-Do')} ${dim('— task vault CLI')}
+${bold('Vault')} ${dim('— tasks, notes and passwords')}
 
 ${bold('Capture')}
   add <title> [--p 0-3] [--due X] [--tag a,b] [--project X]

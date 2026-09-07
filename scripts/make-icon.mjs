@@ -1,5 +1,5 @@
 /**
- * Generates To-Do's icon assets as PNGs with no image dependencies.
+ * Generates Vault's icon assets as PNGs with no image dependencies.
  *
  *   node scripts/make-icon.mjs
  *

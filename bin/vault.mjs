@@ -1,5 +1,5 @@
 /**
- * To-Do vault — the single source of truth for all task data.
+ * Vault — the single source of truth for tasks, notes and projects.
  *
  * The vault is one JSON file. Every write is atomic (temp file + rename) so the
  * Tauri app, which watches the file, never observes a half-written document.

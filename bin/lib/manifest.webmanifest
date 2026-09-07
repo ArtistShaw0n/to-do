@@ -1,6 +1,6 @@
 {
-  "name": "To-Do",
-  "short_name": "To-Do",
+  "name": "Vault",
+  "short_name": "Vault",
   "description": "Tasks and notes, shared across every device.",
   "start_url": "/",
   "scope": "/",

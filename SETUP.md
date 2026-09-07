@@ -1,4 +1,4 @@
-# Putting To-Do on four devices
+# Putting Vault on four devices
 
 One vault, shared by two Macs, two phones and the CLI Claude drives. Everything
 below is on Cloudflare's free tier: the data is 33 KB and the limits are 5

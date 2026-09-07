@@ -1,7 +1,7 @@
 {
   "name": "todo",
   "version": "0.18.3",
-  "description": "To-Do — a Liquid Glass task manager for macOS, driven by Claude Code",
+  "description": "Vault \u2014 tasks, notes and passwords, in step across every device",
   "private": true,
   "type": "module",
   "bin": {

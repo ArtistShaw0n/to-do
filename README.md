@@ -1,4 +1,4 @@
-# To-Do
+# Vault
 
 A small, fast task manager for macOS with a Liquid Glass interface — driven
 from Claude Code.
@@ -17,14 +17,14 @@ file watcher and updates in under ~150 ms.
 
 ## Install
 
-Grab `To-Do_universal.dmg` from [Releases](https://github.com/ArtistShaw0n/to-do/releases)
+Grab `Vault_universal.dmg` from [Releases](https://github.com/ArtistShaw0n/to-do/releases)
 and drag it to Applications.
 
-To-Do isn't notarised with an Apple Developer ID, so macOS quarantines the first
+Vault isn't notarised with an Apple Developer ID, so macOS quarantines the first
 launch. Right-click the app → **Open**, or:
 
 ```bash
-xattr -cr /Applications/To-Do.app
+xattr -cr /Applications/Vault.app
 ```
 
 Updates after that install silently in-app.
@@ -64,7 +64,7 @@ be surfaced later without touching the data.
 | `⏎` | add the typed task |
 | `Esc` | clear the input |
 
-Closing the window parks To-Do in the menu bar, where the icon shows your open
+Closing the window parks Vault in the menu bar, where the icon shows your open
 count. Quitting is `⌘Q` or the tray menu.
 
 ---

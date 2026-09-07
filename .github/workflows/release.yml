@@ -1,7 +1,7 @@
 name: Release
 
 # Pushing a v* tag builds, signs and publishes the release that installed
-# copies of To-Do will auto-update from.
+# copies of Vault will auto-update from.
 on:
   push:
     tags:
@@ -57,14 +57,14 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'To-Do ${{ github.ref_name }}'
+          releaseName: 'Vault ${{ github.ref_name }}'
           releaseBody: |
-            **macOS** — download `To-Do_universal.dmg` and drag it to Applications.
+            **macOS** — download `Vault_universal.dmg` and drag it to Applications.
             **Windows** — download the `.exe` installer.
 
-            To-Do is signed for updates but not notarised with an Apple Developer
+            Vault is signed for updates but not notarised with an Apple Developer
             ID, so the first launch on macOS needs **right-click → Open** (or
-            `xattr -cr /Applications/To-Do.app`). Later updates install silently.
+            `xattr -cr /Applications/Vault.app`). Later updates install silently.
 
             Phones do not need an install from here: open the hub's address in
             the browser and add it to the home screen.

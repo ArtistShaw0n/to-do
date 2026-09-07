@@ -1,30 +1,39 @@
 import { useEffect, useMemo, useState } from 'react';
-import { longDate } from './lib/dates';
+import { NOTE_KIND_META, type Note, type Task } from './lib/types';
+import { isOverdue, relativeDue } from './lib/dates';
 import {
-  addNote, addTask, deleteNote, deleteTask, groupBugsByModule, isOpen,
-  sortNotes, sortTasks, toggleDone, updateNote, updateTask,
+  addNote, addTask, deleteNote, deleteTask, isOpen, projectColor,
+  searchNotes, sortNotes, sortTasks, toggleDone, updateNote, updateTask,
 } from './lib/vault';
 import { useVault } from './lib/useVault';
-import { TaskRow } from './components/TaskRow';
-import { NotesView } from './components/NotesView';
-import { Composer } from './components/Composer';
-
-/** Keep the completed list from growing without bound in the UI. */
-const RECENT_DONE = 50;
+import { EmptyDetail, NoteDetail, TaskDetail } from './components/DetailPane';
+import {
+  CheckGlyph, NoteGlyph, PlusGlyph, SearchGlyph, SortGlyph, ViewGlyph,
+  type ViewGlyphName,
+} from './components/glyphs';
 
 type ThemeMode = 'system' | 'light' | 'dark';
 const THEME_ORDER: ThemeMode[] = ['system', 'light', 'dark'];
 
-type View = 'all' | 'personal' | 'bugs' | 'notes';
+type View = 'all' | 'personal' | 'bugs' | 'notes' | 'done';
 
-/** The project the Personal tab filters to. */
+/** The project the Personal category filters to. */
 const PERSONAL = 'Personal';
+
+const CATEGORIES: { view: View; label: string; glyph: ViewGlyphName; color: string }[] = [
+  { view: 'all', label: 'All', glyph: 'all', color: 'var(--blue)' },
+  { view: 'personal', label: 'Personal', glyph: 'personal', color: 'var(--green)' },
+  { view: 'bugs', label: 'Bugs', glyph: 'bugs', color: 'var(--pink)' },
+  { view: 'notes', label: 'Notes', glyph: 'notes', color: 'var(--orange)' },
+  { view: 'done', label: 'Done', glyph: 'done', color: 'var(--text-3)' },
+];
 
 export default function App() {
   const { vault, error, mutate } = useVault();
   const [view, setView] = useState<View>('all');
-  const [showDone, setShowDone] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [newest, setNewest] = useState(true);
   const [update, setUpdate] = useState<{ version: string; install: () => Promise<void> } | null>(null);
 
   const [theme, setTheme] = useState<ThemeMode>(
@@ -39,8 +48,7 @@ export default function App() {
 
     // The NSVisualEffectView behind the webview follows the *window's*
     // appearance, not our CSS. Without this, choosing Light while macOS is in
-    // Dark leaves light cards floating on dark system material — the CSS and
-    // the vibrancy disagree and the result looks broken.
+    // Dark leaves light content sitting on dark system material.
     if ('__TAURI_INTERNALS__' in window) {
       void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
         void getCurrentWindow().setTheme(theme === 'system' ? null : theme);
@@ -48,7 +56,6 @@ export default function App() {
     }
   }, [theme]);
 
-  // Auto-update stays — invisible until there is actually a new version.
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return;
     let cancelled = false;
@@ -71,63 +78,87 @@ export default function App() {
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
-  const open = useMemo(() => {
-    if (!vault) return [];
+  const counts = useMemo(() => {
+    if (!vault) return {} as Record<View, number>;
     const live = vault.tasks.filter(isOpen);
-    // "All" still means everything; Personal is a view onto part of it.
-    return sortTasks(view === 'personal' ? live.filter((t) => t.project === PERSONAL) : live);
-  }, [vault, view]);
-  const bugGroups = useMemo(() => (vault ? groupBugsByModule(vault) : []), [vault]);
-  const openBugCount = useMemo(
-    () => bugGroups.reduce((n, g) => n + g.bugs.length, 0),
-    [bugGroups],
-  );
+    return {
+      all: live.length,
+      personal: live.filter((t) => t.project === PERSONAL).length,
+      bugs: live.filter((t) => t.tags.includes('bug')).length,
+      notes: vault.notes.length,
+      done: vault.tasks.filter((t) => !isOpen(t)).length,
+    } as Record<View, number>;
+  }, [vault]);
 
-  const notes = useMemo(() => (vault ? sortNotes(vault.notes) : []), [vault]);
-
-  const done = useMemo(() => {
+  /** The middle column's contents for the current category. */
+  const items = useMemo<(Task | Note)[]>(() => {
     if (!vault) return [];
-    const finished = vault.tasks
-      .filter((t) => !isOpen(t))
-      .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''));
-    // The Completed section belongs to whichever view you're in.
-    const scoped =
-      view === 'bugs' ? finished.filter((t) => t.tags.includes('bug'))
-        : view === 'personal' ? finished.filter((t) => t.project === PERSONAL)
-        : finished;
-    return scoped.slice(0, RECENT_DONE);
-  }, [vault, view]);
+
+    if (view === 'notes') {
+      const found = sortNotes(searchNotes(vault.notes, query));
+      return newest ? found : [...found].reverse();
+    }
+
+    const live = vault.tasks.filter(isOpen);
+    let scoped: Task[];
+    switch (view) {
+      case 'personal': scoped = live.filter((t) => t.project === PERSONAL); break;
+      case 'bugs': scoped = live.filter((t) => t.tags.includes('bug')); break;
+      case 'done': scoped = vault.tasks.filter((t) => !isOpen(t)); break;
+      default: scoped = live;
+    }
+
+    const q = query.trim().toLowerCase();
+    if (q) {
+      scoped = scoped.filter((t) =>
+        `${t.title} ${t.notes ?? ''} ${t.tags.join(' ')} ${t.project ?? ''}`
+          .toLowerCase()
+          .includes(q),
+      );
+    }
+
+    const ordered = view === 'done'
+      ? [...scoped].sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
+      : sortTasks(scoped);
+    return newest ? ordered : [...ordered].reverse();
+  }, [vault, view, query, newest]);
+
+  const selected = useMemo(() => {
+    if (!vault || !selectedId) return null;
+    return (
+      vault.notes.find((n) => n.id === selectedId)
+      ?? vault.tasks.find((t) => t.id === selectedId)
+      ?? null
+    );
+  }, [vault, selectedId]);
+
+  // "+" creates an item that already belongs to the category you are in.
+  const addHere = () => {
+    if (view === 'notes') {
+      void mutate((v) => addNote(v, { title: 'New note' }));
+    } else {
+      void mutate((v) => addTask(v, {
+        title: 'New task',
+        ...(view === 'personal' ? { project: PERSONAL } : {}),
+        ...(view === 'bugs' ? { tags: ['bug'] } : {}),
+      }));
+    }
+  };
 
   if (error && !vault) {
     return (
-      <div className="empty" style={{ height: '100%' }}>
-        <div className="empty-mark">⚠</div>
-        <div className="empty-title">Could not open the vault</div>
-        <div style={{ maxWidth: 320 }}>{error}</div>
+      <div className="detail-empty" style={{ height: '100%' }}>
+        <div className="detail-empty-title">Could not open the vault</div>
+        <div className="detail-empty-sub" style={{ maxWidth: 340 }}>{error}</div>
       </div>
     );
   }
+  if (!vault) return <div style={{ height: '100%' }} />;
 
-  if (!vault) return <div className="empty" style={{ height: '100%' }} />;
-
-  const rowProps = (id: string) => ({
-    vault,
-    editing: editingId === id,
-    onToggle: () => void mutate((v) => toggleDone(v, id)),
-    onOpen: () => setEditingId(id),
-    onClose: () => setEditingId(null),
-    onPatch: (patch: Parameters<typeof updateTask>[2]) => void mutate((v) => updateTask(v, id, patch)),
-    onDelete: () => {
-      void mutate((v) => deleteTask(v, id));
-      setEditingId(null);
-    },
-  });
-
+  const label = CATEGORIES.find((c) => c.view === view)?.label ?? 'All';
   const themeLabel = theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark';
 
   return (
@@ -136,70 +167,39 @@ export default function App() {
         <span /><span /><span /><span />
       </div>
 
-      <div className="drag-strip" data-tauri-drag-region />
-
-      <main className="sheet">
-        <header className="sheet-head">
-          <div>
-            <h1 className="sheet-title">
-              {view === 'bugs' ? 'Bugs'
-                : view === 'notes' ? 'Notes'
-                : view === 'personal' ? 'Personal'
-                : 'Tasks'}
-            </h1>
-            <p className="sheet-date">{longDate()}</p>
+      <div className="shell">
+        {/* Categories */}
+        <aside className="sidebar" data-tauri-drag-region>
+          <div className="tile-grid">
+            {CATEGORIES.map((c) => (
+              <button
+                key={c.view}
+                className="tile"
+                aria-current={view === c.view}
+                style={{ '--tile': c.color } as React.CSSProperties}
+                onClick={() => {
+                  setView(c.view);
+                  setSelectedId(null);
+                  setQuery('');
+                }}
+              >
+                <span className="tile-top">
+                  <span className="tile-icon"><ViewGlyph name={c.glyph} size={15} /></span>
+                  <span className="tile-count">{counts[c.view] ?? 0}</span>
+                </span>
+                <span className="tile-label">{c.label}</span>
+              </button>
+            ))}
           </div>
 
-          <div className="head-controls">
-            <div className="view-seg" role="tablist">
-              <button
-                role="tab"
-                aria-selected={view === 'all'}
-                onClick={() => {
-                  setView('all');
-                  setEditingId(null);
-                }}
-              >
-                All
-              </button>
-              <button
-                role="tab"
-                aria-selected={view === 'personal'}
-                onClick={() => {
-                  setView('personal');
-                  setEditingId(null);
-                }}
-              >
-                Personal
-              </button>
-              <button
-                role="tab"
-                aria-selected={view === 'bugs'}
-                onClick={() => {
-                  setView('bugs');
-                  setEditingId(null);
-                }}
-              >
-                Bugs
-                {openBugCount > 0 && <span className="seg-count">{openBugCount}</span>}
-              </button>
-              <button
-                role="tab"
-                aria-selected={view === 'notes'}
-                onClick={() => {
-                  setView('notes');
-                  setEditingId(null);
-                }}
-              >
-                Notes
-              </button>
-            </div>
-
+          <div className="sidebar-foot">
             <button
               className="theme-btn"
               title={`Appearance: ${themeLabel}`}
               aria-label={`Appearance: ${themeLabel}. Click to change.`}
-              onClick={() => setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length])}
+              onClick={() =>
+                setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length])
+              }
             >
               {theme === 'light' ? (
                 <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -218,158 +218,181 @@ export default function App() {
               )}
             </button>
           </div>
-        </header>
+        </aside>
 
-        <div className="sheet-scroll" onClick={() => setEditingId(null)}>
-          {view === 'notes' ? (
-            <NotesView
-              notes={notes}
-              editingId={editingId}
-              onOpen={setEditingId}
-              onClose={() => setEditingId(null)}
-              onPatch={(id, patch) => void mutate((v) => updateNote(v, id, patch))}
-              onDelete={(id) => {
-                void mutate((v) => deleteNote(v, id));
-                setEditingId(null);
-              }}
-            />
-          ) : view === 'all' || view === 'personal' ? (
-            open.length === 0 ? (
-              <div className="empty">
-                <div className="empty-mark">✓</div>
-                <div className="empty-title">
-                  {view === 'personal' ? 'Nothing personal pending' : 'All clear'}
-                </div>
-                <div>Add one below.</div>
-              </div>
-            ) : (
-              <div className="task-stack">
-                {open.map((task) => (
-                  <TaskRow key={task.id} task={task} {...rowProps(task.id)} />
-                ))}
-              </div>
-            )
-          ) : bugGroups.length === 0 ? (
-            <div className="empty">
-              <div className="empty-mark">✓</div>
-              <div className="empty-title">No open bugs</div>
-              <div>Tag a task `bug` plus its module to file one here.</div>
+        {/* List */}
+        <section className="list-col">
+          <header className="col-head" data-tauri-drag-region>
+            <div className="col-title">
+              {label}
+              <span className="col-sub">
+                {items.length} {items.length === 1 ? 'item' : 'items'}
+              </span>
             </div>
-          ) : (
-            bugGroups.map((group) => (
-              <section key={group.module} className="bug-group">
-                <div className="bug-group-head">
-                  <span className="bug-module">{group.module}</span>
-                  <span className="bug-count">
-                    {group.bugs.length} {group.bugs.length === 1 ? 'bug' : 'bugs'}
-                  </span>
-                </div>
+            <button
+              className="icon-btn"
+              title={newest ? 'Newest first' : 'Oldest first'}
+              aria-label={newest ? 'Newest first' : 'Oldest first'}
+              onClick={() => setNewest((n) => !n)}
+            >
+              <SortGlyph />
+            </button>
+            <button className="icon-btn" title="Add" aria-label="Add" onClick={addHere}>
+              <PlusGlyph />
+            </button>
+          </header>
 
-                {/* What these fixes are heading into. */}
-                {group.release && (
-                  <button
-                    className="bug-release"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingId(group.release!.id);
-                    }}
-                  >
-                    ↳ {group.release.title}
-                  </button>
-                )}
+          <div className="list-scroll">
+            {items.length === 0 ? (
+              <div className="list-empty">{query ? 'No matches' : 'Nothing here'}</div>
+            ) : (
+              items.map((item) =>
+                'kind' in item ? (
+                  <NoteListRow
+                    key={item.id}
+                    note={item}
+                    selected={item.id === selectedId}
+                    onSelect={() => setSelectedId(item.id)}
+                  />
+                ) : (
+                  <TaskListRow
+                    key={item.id}
+                    task={item}
+                    color={projectColor(vault, item.project)}
+                    selected={item.id === selectedId}
+                    onSelect={() => setSelectedId(item.id)}
+                    onToggle={() => void mutate((v) => toggleDone(v, item.id))}
+                  />
+                ),
+              )
+            )}
+          </div>
+        </section>
 
-                <div className="task-stack">
-                  {group.bugs.map((task) => (
-                    <TaskRow key={task.id} task={task} {...rowProps(task.id)} />
-                  ))}
-                </div>
-              </section>
-            ))
-          )}
-
-          {view !== 'notes' && done.length > 0 && (
-            <>
-              <button
-                className="done-toggle"
-                aria-expanded={showDone}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowDone((s) => !s);
+        {/* Detail */}
+        <section className="detail-col">
+          <header className="col-head detail-head-bar" data-tauri-drag-region>
+            <div className="search-field">
+              <SearchGlyph />
+              <input
+                value={query}
+                placeholder="Search"
+                spellCheck={false}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setQuery('');
+                    e.currentTarget.blur();
+                  }
                 }}
-              >
-                <span className="done-caret">▶</span>
-                {view === 'bugs' ? 'Fixed' : 'Completed'}
-                <span className="done-count">{done.length}</span>
-              </button>
+              />
+            </div>
+          </header>
 
-              {showDone && (
-                <div className="task-stack">
-                  {done.map((task) => (
-                    <TaskRow key={task.id} task={task} {...rowProps(task.id)} />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {view === 'notes' ? (
-          <NoteComposer onAdd={(title) => void mutate((v) => addNote(v, { title }))} />
-        ) : (
-          <Composer
-            projects={vault.projects.map((p) => p.name)}
-            // Anything added from the Bugs view is a bug; the placeholder says
-            // so rather than tagging silently.
-            forceTags={view === 'bugs' ? ['bug'] : undefined}
-            forceProject={view === 'personal' ? PERSONAL : undefined}
-            onAdd={(draft) => void mutate((v) => addTask(v, draft))}
-          />
-        )}
-      </main>
+          <div className="detail-scroll">
+            {!selected ? (
+              <EmptyDetail />
+            ) : 'kind' in selected ? (
+              <NoteDetail
+                note={selected}
+                onPatch={(patch) => void mutate((v) => updateNote(v, selected.id, patch))}
+                onDelete={() => {
+                  void mutate((v) => deleteNote(v, selected.id));
+                  setSelectedId(null);
+                }}
+              />
+            ) : (
+              <TaskDetail
+                task={selected}
+                vault={vault}
+                onPatch={(patch) => void mutate((v) => updateTask(v, selected.id, patch))}
+                onToggle={() => void mutate((v) => toggleDone(v, selected.id))}
+                onDelete={() => {
+                  void mutate((v) => deleteTask(v, selected.id));
+                  setSelectedId(null);
+                }}
+              />
+            )}
+          </div>
+        </section>
+      </div>
 
       {update && (
         <div className="toast">
           Version {update.version} available
-          <button className="btn-update" onClick={() => void update.install()}>
-            Update
-          </button>
+          <button className="btn-update" onClick={() => void update.install()}>Update</button>
         </div>
       )}
     </>
   );
 }
 
-function NoteComposer({ onAdd }: { onAdd: (title: string) => void }) {
-  const [value, setValue] = useState('');
+// List rows ──────────────────────────────────────────────────────────────────
 
-  const submit = () => {
-    const title = value.trim();
-    if (!title) return;
-    onAdd(title);
-    setValue('');
-  };
+function TaskListRow({
+  task,
+  color,
+  selected,
+  onSelect,
+  onToggle,
+}: {
+  task: Task;
+  color: string;
+  selected: boolean;
+  onSelect: () => void;
+  onToggle: () => void;
+}) {
+  const done = task.status === 'done' || task.status === 'cancelled';
+  const due = relativeDue(task.due);
+  const late = !done && isOverdue(task.due);
+  const subtitle = task.project ?? task.notes ?? '';
 
   return (
-    <div className="composer">
-      <div className="composer-shell">
-        <div className="composer-row">
-          <input
-            value={value}
-            placeholder="Add a note…"
-            spellCheck={false}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submit();
-              } else if (e.key === 'Escape') {
-                setValue('');
-                e.currentTarget.blur();
-              }
-            }}
-          />
-          <span className="composer-hint">⏎</span>
+    <div className="row" data-selected={selected} data-done={done} onClick={onSelect}>
+      <button
+        className="check"
+        data-done={done}
+        aria-label={done ? `Reopen ${task.title}` : `Complete ${task.title}`}
+        onClick={(e) => {
+          e.stopPropagation(); // the row itself only selects
+          onToggle();
+        }}
+      >
+        <CheckGlyph />
+      </button>
+
+      <div className="row-main">
+        <div className="row-title">{task.title}</div>
+        <div className="row-sub">
+          {task.project && <span className="row-dot" style={{ background: color }} />}
+          <span className="row-sub-text">{subtitle}</span>
+          {due && !done && <span className="row-due" data-late={late}>{due}</span>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function NoteListRow({
+  note,
+  selected,
+  onSelect,
+}: {
+  note: Note;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const meta = NOTE_KIND_META[note.kind];
+  const subtitle = note.username || note.url || note.body.split('\n')[0] || meta.label;
+
+  return (
+    <div className="row" data-selected={selected} onClick={onSelect}>
+      <span className="note-badge" style={{ '--kind': meta.color } as React.CSSProperties}>
+        <NoteGlyph kind={note.kind} size={15} />
+      </span>
+      <div className="row-main">
+        <div className="row-title">{note.title}</div>
+        <div className="row-sub"><span className="row-sub-text">{subtitle}</span></div>
       </div>
     </div>
   );

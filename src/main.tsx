@@ -30,32 +30,23 @@ if (!inTauri) {
   }
 }
 
-// The vault is already offline-capable in IndexedDB; this only ensures the
-// app's own files are present, so opening it with no signal shows the tasks
-// rather than a browser error page. Pointless inside Tauri, where the files
-// are on disk already.
+// Chrome wants a service worker before it will install a site to the home
+// screen as an app. This one caches nothing — see public/sw.js — but an older
+// version of it did, so ask for an update on every load: a device still
+// running that one has to be told to replace it, and until it does it keeps
+// serving whatever build it cached.
 if (!inTauri && 'serviceWorker' in navigator) {
-  const register = () => {
-    void navigator.serviceWorker.register('/sw.js').catch((err: unknown) => {
-      // Losing the offline shell is smaller than failing to start, so this is
-      // never fatal — but it must not be silent either. Without the reason,
-      // "the app won't open on the train" has nowhere to begin.
-      console.warn('offline shell unavailable:', err);
-    });
+  const register = async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      await reg.update();
+    } catch (err) {
+      console.warn('service worker unavailable:', err);
+    }
   };
-  // A module script can run after `load` has already fired, in which case the
-  // listener would never call back and registration would simply never happen.
-  if (document.readyState === 'complete') register();
-  else window.addEventListener('load', register, { once: true });
+  if (document.readyState === 'complete') void register();
+  else window.addEventListener('load', () => void register(), { once: true });
 }
-
-// The webview's own context menu and drag-to-navigate feel wrong in a native
-// window, so suppress them.
-window.addEventListener('contextmenu', (e) => {
-  const target = e.target as HTMLElement;
-  const editable = target.closest('input, textarea, [contenteditable]');
-  if (!editable) e.preventDefault();
-});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

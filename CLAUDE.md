@@ -145,6 +145,25 @@ Reproduce steps and screenshots belong in the GitLab issue, next to the fix
 commit; put the issue link in `--notes`. The task here is the one line saying
 what has to change.
 
+### The composer does this too
+
+Tasks no longer only arrive through you. Text typed into the app's composer is
+normalised on the spot, in two passes:
+
+1. `normaliseLocally` in `src/lib/normalise.ts` recognises the words — the time
+   and priority tables above, existing project names, kind and module tags — and
+   the task appears immediately in Shawon's own wording.
+2. The app then shells out to `claude -p` (the `normalise_task` command in
+   `src-tauri/src/lib.rs`) with a condensed copy of the rules on this page, and
+   rewrites the task in place with a clean English title, project and notes.
+
+If the CLI is missing, logged out or slow, pass 1 stands and nothing is lost.
+
+**`normalise.ts` is a fourth implementation of the rules in this section.** Add
+a time word, a priority word or a module here and it has to go in that file's
+tables and in `buildPrompt` too, or the app and the CLI will disagree about the
+same sentence.
+
 ### Judgement calls
 
 - **Several tasks in one sentence → several `add` calls.** "invoice pathate hobe

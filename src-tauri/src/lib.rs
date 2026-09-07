@@ -7,8 +7,9 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use notify::RecursiveMode;
 use notify_debouncer_full::new_debouncer;
@@ -214,6 +215,93 @@ fn show_main_window(app: AppHandle) {
     focus_main(&app);
 }
 
+// ── Normalising what the composer was given ──────────────────────────────────
+
+/// How long to let `claude` think before giving up. The composer has already
+/// shown the user a usable task by this point, so a timeout costs polish, not
+/// data — and a wedged subprocess must never wedge the app.
+const NORMALISE_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// Locate the Claude Code CLI.
+///
+/// A macOS app launched from Finder inherits a bare PATH, not the shell's, so
+/// `Command::new("claude")` fails even when it works perfectly in a terminal.
+/// Check the places it actually installs to, then fall back to asking a login
+/// shell — which is what picks up a PATH set in .zshrc.
+fn find_claude() -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".local/bin/claude"));
+        candidates.push(home.join(".claude/local/claude"));
+        candidates.push(home.join("bin/claude"));
+    }
+    candidates.push(PathBuf::from("/opt/homebrew/bin/claude"));
+    candidates.push(PathBuf::from("/usr/local/bin/claude"));
+
+    if let Some(found) = candidates.into_iter().find(|p| p.is_file()) {
+        return Some(found);
+    }
+
+    let out = Command::new("/bin/zsh")
+        .args(["-lic", "command -v claude"])
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if path.is_empty() { None } else { Some(PathBuf::from(path)) }
+}
+
+/// Run one prompt through Claude Code and return what it printed.
+///
+/// Errors here are expected, not exceptional — no CLI installed, a lapsed
+/// login, no network. The frontend keeps the locally-parsed task in every one
+/// of those cases, so this only ever reports why the better version is missing.
+#[tauri::command]
+async fn normalise_task(prompt: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let bin = find_claude().ok_or_else(|| {
+            "Claude Code CLI not found. Install it, or leave tasks as typed.".to_string()
+        })?;
+
+        // stdin must be closed explicitly: `claude -p` waits several seconds
+        // for piped input before deciding there is none.
+        let mut child = Command::new(&bin)
+            .arg("-p")
+            .arg(&prompt)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("could not start {}: {e}", bin.display()))?;
+
+        let deadline = Instant::now() + NORMALISE_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {
+                    if Instant::now() >= deadline {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err("Claude took too long; kept the task as typed.".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(120));
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+
+        let out = child.wait_with_output().map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            let msg = err.trim().lines().next().unwrap_or("claude failed");
+            return Err(msg.to_string());
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ── Window helpers ───────────────────────────────────────────────────────────
 
 fn focus_main(app: &AppHandle) {
@@ -356,6 +444,7 @@ pub fn run() {
             reveal_vault,
             set_tray_badge,
             show_main_window,
+            normalise_task,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

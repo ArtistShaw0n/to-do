@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NOTE_KIND_META, type Note, type Task } from './lib/types';
-import { isOverdue, longDate, parseDateInput, relativeDue } from './lib/dates';
+import { isOverdue, longDate, relativeDue } from './lib/dates';
 import {
-  addNote, addTask, deleteNote, deleteTask, isOpen, projectColor,
+  addNote, addTask, deleteNote, deleteTask, isOpen, newId, projectColor,
   searchNotes, sortNotes, sortTasks, toggleDone, updateNote, updateTask,
 } from './lib/vault';
+import { buildPrompt, normaliseLocally, parseResponse } from './lib/normalise';
 import { useVault } from './lib/useVault';
 import { NoteDetail, TaskDetail } from './components/DetailPane';
 import { CheckGlyph, NoteGlyph, ViewGlyph, type ViewGlyphName } from './components/glyphs';
@@ -30,6 +31,9 @@ export default function App() {
   const [view, setView] = useState<View>('all');
   const [openId, setOpenId] = useState<string | null>(null);
   const [update, setUpdate] = useState<{ version: string; install: () => Promise<void> } | null>(null);
+  /** Tasks currently being rewritten by Claude. Deliberately not persisted:
+      a task interrupted by a quit is simply left as it was typed. */
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
 
   const [theme, setTheme] = useState<ThemeMode>(
     () => (localStorage.getItem('todo.theme') as ThemeMode) ?? 'system',
@@ -116,18 +120,77 @@ export default function App() {
 
   const themeLabel = theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark';
 
-  /** Anything typed in belongs to the category that is open. */
-  const add = (title: string, due?: string) => {
+  /**
+   * Anything typed in belongs to the category that is open.
+   *
+   * Two passes. The local one runs now and its result goes straight into the
+   * list, so the task is never held hostage to a subprocess. Claude then
+   * rewrites it in place — properly translated, with a project and notes. If
+   * Claude is missing, logged out or slow, what was typed simply stays.
+   */
+  const add = (raw: string) => {
+    const text = raw.trim();
+    if (!text) return;
+
     if (view === 'notes') {
-      void mutate((v) => addNote(v, { title }));
+      void mutate((v) => addNote(v, { title: text }));
       return;
     }
-    void mutate((v) => addTask(v, {
-      title,
-      ...(due ? { due } : {}),
-      ...(view === 'personal' ? { project: PERSONAL } : {}),
-      ...(view === 'bugs' ? { tags: ['bug'] } : {}),
-    }));
+
+    const local = normaliseLocally(text, vault);
+    const id = newId();
+
+    // The open category is context in its own right: typing under Bugs means
+    // this is a bug, even when the words never say so.
+    const fromView = {
+      ...(view === 'personal' && !local.project ? { project: PERSONAL } : {}),
+      ...(view === 'bugs' && !local.tags.includes('bug')
+        ? { tags: [...local.tags, 'bug'] } : {}),
+    };
+
+    void mutate((v) => addTask(v, { id, ...local, ...fromView }));
+    void enrich(id, text, local, fromView);
+  };
+
+  /** Hand the raw text to Claude Code and fold the better version back in. */
+  const enrich = async (
+    id: string,
+    raw: string,
+    local: ReturnType<typeof normaliseLocally>,
+    fromView: { project?: string; tags?: string[] },
+  ) => {
+    setBusy((b) => new Set(b).add(id));
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const text = await invoke<string>('normalise_task', { prompt: buildPrompt(raw, vault) });
+      const better = parseResponse(text, raw, local);
+
+      // The category the user typed under is a fact; a model guess does not
+      // get to overrule it.
+      const tags = fromView.tags
+        ? [...new Set([...better.tags, ...fromView.tags])]
+        : better.tags;
+
+      await mutate((v) => updateTask(v, id, {
+        title: better.title,
+        project: fromView.project ?? better.project,
+        tags,
+        notes: better.notes,
+        due: better.due,
+        priority: better.priority,
+        originalInput: raw,
+      }));
+    } catch {
+      // No CLI, a lapsed login, offline, a reply that was not JSON — every one
+      // of these leaves a perfectly usable task behind, so none is worth
+      // interrupting the user over.
+    } finally {
+      setBusy((b) => {
+        const next = new Set(b);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   return (
@@ -221,6 +284,7 @@ export default function App() {
                     key={item.id}
                     task={item}
                     vault={vault}
+                    busy={busy.has(item.id)}
                     open={openId === item.id}
                     onOpen={() => setOpenId(item.id)}
                     onToggle={() => void mutate((v) => toggleDone(v, item.id))}
@@ -252,10 +316,11 @@ export default function App() {
 // Cards ──────────────────────────────────────────────────────────────────────
 
 function TaskCard({
-  task, vault, open, onOpen, onToggle, onPatch, onDelete,
+  task, vault, busy, open, onOpen, onToggle, onPatch, onDelete,
 }: {
   task: Task;
   vault: Parameters<typeof TaskDetail>[0]['vault'];
+  busy: boolean;
   open: boolean;
   onOpen: () => void;
   onToggle: () => void;
@@ -268,7 +333,8 @@ function TaskCard({
   const color = projectColor(vault, task.project);
 
   return (
-    <div className="card" data-open={open} data-done={done} onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+    <div className="card" data-open={open} data-done={done} data-busy={busy || undefined}
+      onClick={(e) => { e.stopPropagation(); onOpen(); }}>
       <div className="card-row">
         <button
           className="check"
@@ -341,25 +407,15 @@ function NoteCard({
 
 // Composer ───────────────────────────────────────────────────────────────────
 
-function Composer({ noun, onAdd }: { noun: string; onAdd: (title: string, due?: string) => void }) {
+function Composer({ noun, onAdd }: { noun: string; onAdd: (raw: string) => void }) {
   const [value, setValue] = useState('');
 
+  // Hands the line over verbatim. Pulling the date out here as well would mean
+  // two different parsers disagreeing about the same sentence; `normaliseLocally`
+  // owns that, and it reads the whole line rather than just the last two words.
   const submit = () => {
-    const words = value.trim().split(/\s+/).filter(Boolean);
-    if (!words.length) return;
-
-    // A trailing date word becomes the due date — the one attribute the card
-    // shows without opening it.
-    let due: string | undefined;
-    for (let take = Math.min(2, words.length); take >= 1; take -= 1) {
-      if (take >= words.length) continue;
-      const parsed = parseDateInput(words.slice(-take).join(' '));
-      if (parsed) { due = parsed; words.splice(-take, take); break; }
-    }
-
-    const title = words.join(' ').trim();
-    if (!title) return;
-    onAdd(title, due);
+    if (!value.trim()) return;
+    onAdd(value);
     setValue('');
   };
 

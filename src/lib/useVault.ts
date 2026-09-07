@@ -1,102 +1,106 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Vault } from './types';
-import { computeStats, loadVault, onVaultChanged, saveVault, setTrayBadge } from './vault';
+import { computeStats, loadVault, setTrayBadge } from './vault';
+import {
+  applyVault, currentVault, migrateFromFile, onStoreChanged, readSyncConfig,
+  startLocalPersistence, startSync, type SyncState,
+} from './sync';
 
 interface UseVault {
   vault: Vault | null;
   path: string;
   error: string | null;
-  /** Apply a pure mutation, render optimistically, then persist. */
+  sync: SyncState;
+  /** Apply a pure mutation. The store is the source of truth for the result. */
   mutate: (fn: (v: Vault) => Vault) => Promise<void>;
   reload: () => Promise<void>;
 }
 
+/**
+ * The vault, backed by a TinyBase store rather than a JSON file.
+ *
+ * The interface is unchanged from the file-backed version — the UI hands over a
+ * function from vault to vault and never learns where any of it is kept. What
+ * changed underneath is that a mutation now writes only the rows it touched,
+ * and that every other device sees it.
+ *
+ * There is no conflict path here any more. The old version had to re-apply its
+ * mutation when the CLI wrote between a read and a save; two writers to one
+ * document leave no other option. Rows merge on their own, so the case has
+ * stopped existing rather than being handled better.
+ */
 export function useVault(): UseVault {
   const [vault, setVault] = useState<Vault | null>(null);
-  const [path, setPath] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [sync, setSyncState] = useState<SyncState>('off');
+  const ready = useRef(false);
 
-  // The authoritative copy. State alone would go stale inside the async gap
-  // between two rapid mutations.
-  const ref = useRef<Vault | null>(null);
-
-  const commit = useCallback((next: Vault) => {
-    ref.current = next;
-    setVault(next);
-  }, []);
-
-  const reload = useCallback(async () => {
-    try {
-      const { vault: fresh, path: p } = await loadVault();
-      commit(fresh);
-      setPath(p);
-      setError(null);
-    } catch (err) {
-      setError(String(err));
-    }
-  }, [commit]);
+  const refresh = useCallback(() => setVault(currentVault()), []);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  // Pick up edits made by Claude, the CLI, or file sync.
-  useEffect(() => {
-    let dispose: (() => void) | undefined;
+    let stopPersisting: (() => void) | undefined;
+    let stopSyncing: (() => void) | undefined;
     let cancelled = false;
 
-    void onVaultChanged((fresh) => commit(fresh)).then((fn) => {
-      // Cleanup can run before this resolves (StrictMode remounts, fast
-      // navigation). Without this the listener is registered after teardown
-      // and never removed.
-      if (cancelled) fn();
-      else dispose = fn;
-    });
+    void (async () => {
+      try {
+        stopPersisting = await startLocalPersistence();
+
+        // An existing JSON vault moves across once, before anything is shown,
+        // so the first render is never of an empty list the user then watches
+        // fill in.
+        try {
+          const { vault: fromFile } = await loadVault();
+          migrateFromFile(fromFile);
+        } catch {
+          // No file, or no Tauri to read one — nothing to bring over.
+        }
+
+        if (cancelled) return;
+        ready.current = true;
+        refresh();
+
+        const config = readSyncConfig();
+        if (config) {
+          stopSyncing = await startSync(config, (s) => { if (!cancelled) setSyncState(s); });
+        }
+      } catch (err) {
+        if (!cancelled) setError(String(err));
+      }
+    })();
 
     return () => {
       cancelled = true;
-      dispose?.();
+      stopSyncing?.();
+      stopPersisting?.();
     };
-  }, [commit]);
+  }, [refresh]);
 
-  // Keep the menu bar count in step with whatever is on screen.
+  // One listener covers every source: this window, another device, the CLI.
+  useEffect(() => onStoreChanged(() => { if (ready.current) refresh(); }), [refresh]);
+
   useEffect(() => {
     if (!vault) return;
     const stats = computeStats(vault);
     void setTrayBadge(stats.open, stats.overdue > 0 || stats.urgent > 0);
   }, [vault]);
 
-  const mutate = useCallback(
-    async (fn: (v: Vault) => Vault) => {
-      const current = ref.current;
-      if (!current) return;
+  const mutate = useCallback(async (fn: (v: Vault) => Vault) => {
+    if (!ready.current) return;
+    try {
+      // Read straight from the store rather than from React state: two
+      // mutations in the same tick would otherwise both build on the first's
+      // input and the second would discard the first.
+      applyVault(fn(currentVault()));
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
 
-      const next = fn(current);
-      commit(next); // optimistic — the UI must not wait on disk
+  const reload = useCallback(async () => {
+    refresh();
+  }, [refresh]);
 
-      try {
-        commit(await saveVault(next, current.meta.updatedAt));
-        setError(null);
-      } catch (err) {
-        if (!String(err).includes('conflict')) {
-          setError(String(err));
-          return;
-        }
-        // Someone wrote between our read and our save. Re-apply the same
-        // mutation on top of their version rather than overwriting it.
-        try {
-          const { vault: fresh } = await loadVault();
-          const merged = fn(fresh);
-          commit(await saveVault(merged, fresh.meta.updatedAt));
-          setError(null);
-        } catch (retryErr) {
-          setError(String(retryErr));
-          await reload();
-        }
-      }
-    },
-    [commit, reload],
-  );
-
-  return { vault, path, error, mutate, reload };
+  return { vault, path: 'local store', error, sync, mutate, reload };
 }

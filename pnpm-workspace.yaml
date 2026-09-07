@@ -1,4 +1,6 @@
-# esbuild ships a platform binary via a postinstall script; Vite cannot build
-# without it. pnpm 11 requires build scripts to be allow-listed explicitly.
+# Both ship platform binaries via postinstall scripts, and pnpm 11 requires
+# build scripts to be allow-listed explicitly: esbuild is what Vite builds
+# with, workerd is the runtime `wrangler dev` runs the sync hub on.
 allowBuilds:
   esbuild: true
+  workerd: true

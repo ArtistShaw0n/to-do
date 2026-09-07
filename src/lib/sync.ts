@@ -143,9 +143,23 @@ function createFilePersister(store: MergeableStore): Persister<Persists.Mergeabl
   );
 }
 
-/** Load whatever this device already had. Resolves once the UI can render. */
+/**
+ * Load whatever this device already had. Resolves once the UI can render.
+ *
+ * Which local copy depends on whether a hub is configured, and the reason is
+ * the CLI. With no hub, the JSON file is the only thing the app and
+ * `bin/todo.mjs` share, so the app must keep writing it or the two diverge.
+ * Once a hub exists they both talk to that instead, and the file is redundant —
+ * so IndexedDB is used, exactly as on the phones.
+ *
+ * That is not just tidiness. The vault lives inside a MEGA folder, which macOS
+ * treats as a removable volume: every single write raised a system permission
+ * prompt. Writing a file nothing reads any more, at the price of a dialog per
+ * keystroke, is the worst of both.
+ */
 export async function startLocalPersistence(): Promise<() => void> {
-  const persister = inTauri
+  const useFile = inTauri && !readSyncConfig();
+  const persister = useFile
     ? createFilePersister(getStore())
     : createIndexedDbPersister(getStore(), DB_NAME, 1);
   await persister.load();

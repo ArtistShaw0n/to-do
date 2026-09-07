@@ -44,6 +44,9 @@ export function useVault(): UseVault {
 
     void (async () => {
       try {
+        // Seed the hub first: which local copy to use depends on whether one
+        // is configured, so asking afterwards would be too late.
+        await seedSyncConfigFromHost();
         stopPersisting = await startLocalPersistence();
 
         // An existing JSON vault moves across once, before anything is shown,
@@ -60,7 +63,6 @@ export function useVault(): UseVault {
         ready.current = true;
         refresh();
 
-        await seedSyncConfigFromHost();
         const config = readSyncConfig();
         if (config) {
           stopSyncing = await startSync(config, (s) => { if (!cancelled) setSyncState(s); });

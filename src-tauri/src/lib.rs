@@ -180,6 +180,21 @@ fn write_vault(
     Ok(())
 }
 
+/// The hub this machine is pointed at, as written by `todo sync`.
+///
+/// The frontend keeps its own copy in localStorage, but a fresh install has an
+/// empty one — and on a Mac the CLI is what does the pointing, so without this
+/// the app would sit there local-only next to a CLI that is fully synced.
+#[tauri::command]
+fn sync_config() -> Option<(String, String)> {
+    let config = app_support_dir().join("config.json");
+    let text = fs::read_to_string(&config).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let url = json.get("syncUrl")?.as_str()?.trim().to_string();
+    let key = json.get("syncKey")?.as_str()?.trim().to_string();
+    if url.is_empty() || key.is_empty() { None } else { Some((url, key)) }
+}
+
 #[tauri::command]
 fn vault_location() -> String {
     vault_file().display().to_string()
@@ -467,6 +482,7 @@ pub fn run() {
             read_vault,
             write_vault,
             vault_location,
+            sync_config,
             reveal_vault,
             set_tray_badge,
             show_main_window,

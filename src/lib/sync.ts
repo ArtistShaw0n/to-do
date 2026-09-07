@@ -30,6 +30,7 @@ import { applyVaultToStore, storeToVault } from './store';
 import { loadVault, onVaultChanged, saveVault } from './vault';
 
 const DB_NAME = 'todo-vault';
+const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 const CONFIG_KEY = 'todo.sync';
 
 export interface SyncConfig {
@@ -49,6 +50,28 @@ export function readSyncConfig(): SyncConfig | null {
     return { url: parsed.url, key: parsed.key };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Take the hub from the CLI's config file, if this device has one and the
+ * browser copy is empty.
+ *
+ * On a Mac it is `todo sync` that points the machine at a hub, and it writes
+ * that to Application Support. A freshly installed app has empty localStorage,
+ * so without this it would start local-only beside a CLI that is fully synced —
+ * the two showing different vaults, which is the exact failure this whole
+ * change exists to remove.
+ */
+export async function seedSyncConfigFromHost(): Promise<void> {
+  if (!inTauri || readSyncConfig()) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const found = await invoke<[string, string] | null>('sync_config');
+    if (found) writeSyncConfig({ url: found[0], key: found[1] });
+  } catch {
+    // No config file, or an older shell without the command: the setup screen
+    // and `todo sync` both still work.
   }
 }
 
@@ -83,8 +106,6 @@ function deviceId(): string {
     return `d${Math.random().toString(36).slice(2, 10)}`;
   }
 }
-
-const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 /**
  * On a Mac, the JSON file stays the local copy.

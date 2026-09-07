@@ -3,7 +3,7 @@ import type { Vault } from './types';
 import { computeStats, loadVault, setTrayBadge } from './vault';
 import {
   applyVault, currentVault, migrateFromFile, onStoreChanged, readSyncConfig,
-  startLocalPersistence, startSync, type SyncState,
+  seedSyncConfigFromHost, startLocalPersistence, startSync, type SyncState,
 } from './sync';
 
 interface UseVault {
@@ -60,6 +60,7 @@ export function useVault(): UseVault {
         ready.current = true;
         refresh();
 
+        await seedSyncConfigFromHost();
         const config = readSyncConfig();
         if (config) {
           stopSyncing = await startSync(config, (s) => { if (!cancelled) setSyncState(s); });

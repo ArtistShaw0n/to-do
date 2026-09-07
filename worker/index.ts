@@ -25,6 +25,8 @@ export interface Env {
   // contract TinyBase defines, and the narrower type is not assignable to it.
   // wrangler.toml is what binds this name to the concrete class.
   TODO_SYNC: DurableObjectNamespace<WsServerDurableObject>;
+  /** The built app. The Worker serves it so the phones need no separate host. */
+  ASSETS: Fetcher;
   /** The shared secret every client must present. Set with `wrangler secret`. */
   SYNC_KEY: string;
 }
@@ -76,7 +78,11 @@ export default {
     // URL is inside TLS, the Worker never logs it, and one wrong key reaches
     // nothing: a different key is simply a different, empty Durable Object.
     const parts = url.pathname.split('/').filter(Boolean);
-    if (parts.length !== 2 || parts[0] !== 'sync') {
+    if (parts[0] !== 'sync') {
+      // Everything that is not the sync endpoint is the app itself.
+      return env.ASSETS.fetch(request);
+    }
+    if (parts.length !== 2) {
       return new Response('not found', { status: 404 });
     }
     if (!env.SYNC_KEY || !secretsMatch(parts[1], env.SYNC_KEY)) {

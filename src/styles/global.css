@@ -776,3 +776,81 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: var(--text-2); background-clip: content-box; }
 
 :focus-visible { outline: 2px solid var(--tint); outline-offset: 2px; }
+
+/* Sync state ─────────────────────────────────────────────────────────────── */
+
+/* Silent when everything is fine. A permanent "connected" light would be noise
+   on a device that is connected almost all of the time; it is the exceptions
+   that are worth a line. */
+.sync-badge {
+  flex: none;
+  margin: 0 0 8px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--glass-strong);
+  box-shadow: inset 0 0 0 1px var(--stroke-bright);
+}
+
+.sync-badge[data-state='offline'] { color: var(--orange); }
+
+/* Phones ─────────────────────────────────────────────────────────────────── */
+
+/* The window this was designed in is 620px wide and has a title bar to clear.
+   A phone has neither, and it has a notch and a home indicator instead. */
+@media (max-width: 520px) {
+  .sheet {
+    padding: calc(env(safe-area-inset-top, 0px) + 14px) 12px 0;
+  }
+
+  .composer {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+  }
+
+  /* Five tiles do not fit across a phone. Let them scroll sideways rather than
+     shrink to the point where the labels are unreadable. */
+  .tile-row {
+    overflow-x: auto;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+  .tile-row::-webkit-scrollbar { display: none; }
+  .tile {
+    flex: 0 0 auto;
+    min-width: 104px;
+    scroll-snap-align: start;
+  }
+
+  /* A finger is not a mouse pointer. */
+  .check { width: 26px; height: 26px; }
+  .card-row { padding: 12px 12px; }
+
+  /* iOS zooms the whole page in when a focused input is under 16px. */
+  .composer input,
+  .detail-input { font-size: 16px; }
+}
+
+/* No drag strip on a phone — there is no window to move. */
+@media (max-width: 520px), (pointer: coarse) {
+  .drag-strip { display: none; }
+}
+
+/* `.detail-hint` is deliberately nowrap — it sits inline beside a date field,
+   where wrapping would push the field around. Explanatory prose needs the
+   opposite, so it gets its own class rather than a fight over one. */
+.field-note {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+  white-space: normal;
+}
+
+.field-note code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--glass-strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}

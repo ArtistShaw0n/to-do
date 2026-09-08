@@ -63,6 +63,45 @@ svg {
   --shadow-card: 0 1px 1px rgba(0, 0, 0, 0.04), 0 2px 6px rgba(0, 0, 0, 0.05);
   --shadow-lift: 0 2px 4px rgba(0, 0, 0, 0.05), 0 8px 22px rgba(0, 0, 0, 0.09);
   --shadow-pop: 0 8px 40px rgba(0, 0, 0, 0.15);
+
+  /* ── Spacing ──────────────────────────────────────────────────────────────
+     A 4pt step on an 8pt rhythm, which is what macOS itself is drawn on.
+
+     Before this there were twenty different spacing values in the file — 5, 6,
+     7, 8, 9, 10, 11, 12 all at once — because each one was chosen where it was
+     written rather than taken from anywhere. Numbers picked that way cannot
+     express hierarchy: the search sat 2px from the list while the list's own
+     rows sat 6px apart, so the eye read the search as part of the list.
+
+     The rule that fixes it: **separation between groups must exceed
+     separation within them.** Outer 12-16, between items 8, inside an item 4.
+     Everything below is one of these. */
+  --s-1: 4px;    /* inside a single element: icon to its label */
+  --s-2: 8px;    /* between siblings that belong together */
+  --s-3: 12px;   /* between one group and the next */
+  --s-4: 16px;   /* page gutter, and around the whole sheet */
+  --s-5: 24px;   /* between major sections */
+  --s-6: 32px;
+
+  /* ── Type ─────────────────────────────────────────────────────────────────
+     Six sizes. There were eleven, including 11.5 and 12.5, which no reader can
+     tell apart from their neighbours — they only make the file harder to keep
+     consistent. */
+  --t-caption: 11px;   /* uppercase field labels, chips */
+  --t-small: 12px;     /* secondary lines, meta */
+  --t-body: 13px;      /* the default */
+  --t-lead: 15px;      /* a card's title */
+  --t-title: 21px;     /* the screen's name */
+  --t-hero: 28px;      /* empty-state mark */
+
+  /* Not a scale step: iOS zooms the page when a focused input is under 16px,
+     so every field the user types into must be at least this. */
+  --t-input: 16px;
+
+  /* Not a scale step either: the distance macOS puts its window buttons from
+     the top, which the title has to clear. */
+  --chrome-top: 44px;
+
   --aurora-alpha: 0.5;
   --app-bg: #eceef2;
 }
@@ -111,7 +150,7 @@ svg {
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display',
     'Helvetica Neue', system-ui, sans-serif;
-  font-size: 13px;
+  font-size: var(--t-body);
   line-height: 1.45;
   color: var(--text-1);
   /* Painted here, not left to the system vibrancy.
@@ -198,7 +237,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 44px 16px 0;
+  padding: var(--chrome-top) var(--s-4) 0;
 }
 
 .sheet-head {
@@ -206,20 +245,20 @@ body {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  padding: 0 2px 14px;
+  gap: var(--s-3);
+  padding: 0 2px var(--s-4);   /* 2px optically aligns with the cards' stroke */
 }
 
 .sheet-title {
   margin: 0;
-  font-size: 21px;
+  font-size: var(--t-title);
   font-weight: 700;
   letter-spacing: -0.025em;
 }
 
 .sheet-date {
-  margin: 2px 0 0;
-  font-size: 12px;
+  margin: var(--s-1) 0 0;
+  font-size: var(--t-small);
   color: var(--text-2);
 }
 
@@ -254,16 +293,16 @@ body {
   flex: none;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 7px;
-  padding: 0 1px 14px;
+  gap: var(--s-2);
+  padding: 0 1px var(--s-4);
 }
 
 .tile {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: var(--s-2);
   min-width: 0;
-  padding: 8px 9px 9px;
+  padding: var(--s-2) var(--s-2) var(--s-2);
   border: 0;
   border-radius: var(--r-card);
   background: var(--glass);
@@ -287,7 +326,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: var(--s-2);
 }
 
 .tile-icon {
@@ -304,7 +343,7 @@ body {
 .tile[aria-current='true'] .tile-icon { background: rgba(255, 255, 255, 0.22); }
 
 .tile-count {
-  font-size: 12.5px;
+  font-size: var(--t-small);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
@@ -313,7 +352,7 @@ body {
 .tile[aria-current='true'] .tile-count { color: rgba(255, 255, 255, 0.85); }
 
 .tile-label {
-  font-size: 11.5px;
+  font-size: var(--t-caption);
   font-weight: 600;
   letter-spacing: -0.006em;
   white-space: nowrap;
@@ -329,14 +368,14 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  margin-right: -10px;
-  padding: 1px 10px 8px 1px;
+  margin-right: calc(var(--s-3) * -1);
+  padding: 1px var(--s-3) var(--s-2) 1px;
 }
 
 .card-stack {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--s-2);
 }
 
 .card {
@@ -389,14 +428,14 @@ body {
 .card-row {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 11px 13px;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-3);
 }
 
 .card-main { flex: 1; min-width: 0; }
 
 .card-title {
-  font-size: 13.5px;
+  font-size: var(--t-body);
   line-height: 19px;
   font-weight: 550;
   letter-spacing: -0.006em;
@@ -410,8 +449,8 @@ body {
 }
 
 .card-notes {
-  margin-top: 3px;
-  font-size: 12px;
+  margin-top: var(--s-1);
+  font-size: var(--t-small);
   line-height: 1.5;
   color: var(--text-2);
   word-break: break-word;
@@ -421,14 +460,14 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
-  margin-top: 7px;
+  gap: var(--s-1);
+  margin-top: var(--s-2);
 }
 
 .card-due {
   flex: none;
   margin-top: 1px;
-  font-size: 11.5px;
+  font-size: var(--t-caption);
   font-weight: 550;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
@@ -439,21 +478,21 @@ body {
 
 /* The detail form, opened inside the card it belongs to. */
 .card-open { border-top: 1px solid var(--stroke); }
-.card-open .detail-body { padding: 14px 13px 13px; }
+.card-open .detail-body { padding: var(--s-4) var(--s-3) var(--s-3); }
 .card-open .detail-head { display: none; }
-.card-open .detail-foot { margin-top: 14px; }
+.card-open .detail-foot { margin-top: var(--s-4); }
 /* The collapsed row above already shows these. */
 .card-open .detail-chips { display: none; }
 
 /* ── Composer ─────────────────────────────────────────────────────────────── */
 
-.composer { flex: none; padding: 8px 0 14px; }
+.composer { flex: none; padding: var(--s-2) 0 var(--s-4); }
 
 .composer-shell {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 9px 12px;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
   border-radius: var(--r-card);
   background: var(--glass-strong);
   box-shadow: inset 0 0 0 1px var(--stroke-bright), var(--shadow-lift);
@@ -472,7 +511,7 @@ body {
   background: transparent;
   color: var(--text-1);
   font: inherit;
-  font-size: 13.5px;
+  font-size: var(--t-body);
   outline: none;
   -webkit-user-select: text;
   user-select: text;
@@ -518,42 +557,42 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 56px 20px;
+  gap: var(--s-1);
+  padding: var(--s-6) var(--s-5);
   text-align: center;
   color: var(--text-3);
 }
 
-.empty-mark { font-size: 28px; opacity: 0.5; }
-.empty-title { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.empty-mark { font-size: var(--t-hero); opacity: 0.5; }
+.empty-title { font-size: var(--t-body); font-weight: 600; color: var(--text-2); }
 
 /* ── Detail form (inside an open card) ────────────────────────────────────── */
 
-.detail-fields { display: flex; flex-direction: column; gap: 11px; }
-.detail-field { display: flex; flex-direction: column; gap: 4px; }
+.detail-fields { display: flex; flex-direction: column; gap: var(--s-3); }
+.detail-field { display: flex; flex-direction: column; gap: var(--s-1); }
 
 .detail-field > span {
-  font-size: 10px;
+  font-size: var(--t-caption);
   font-weight: 650;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-3);
 }
 
-.detail-inline { display: flex; align-items: center; gap: 6px; }
+.detail-inline { display: flex; align-items: center; gap: var(--s-2); }
 .detail-inline .detail-input { flex: 1; min-width: 0; }
 
 .detail-input {
   width: 100%;
   min-height: 30px;
-  padding: 6px 10px;
+  padding: var(--s-2) var(--s-3);
   border: 0;
   border-radius: var(--r-control);
   background: var(--field);
   box-shadow: inset 0 0 0 1px var(--stroke);
   color: var(--text-1);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--t-body);
   outline: none;
   -webkit-user-select: text;
   user-select: text;
@@ -577,7 +616,7 @@ body {
   background: transparent;
   color: var(--text-1);
   font: inherit;
-  font-size: 16px;
+  font-size: var(--t-input);
   font-weight: 650;
   line-height: 1.3;
   letter-spacing: -0.02em;
@@ -587,13 +626,13 @@ body {
   field-sizing: content;
 }
 
-.detail-hint { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+.detail-hint { font-size: var(--t-caption); color: var(--text-3); white-space: nowrap; }
 
-.detail-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+.detail-chips { display: flex; flex-wrap: wrap; gap: var(--s-1); margin-top: var(--s-3); }
 
 .detail-raw {
-  margin-top: 10px;
-  font-size: 12px;
+  margin-top: var(--s-3);
+  font-size: var(--t-small);
   font-style: italic;
   color: var(--text-3);
 }
@@ -601,9 +640,9 @@ body {
 .detail-foot {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 16px;
-  padding-top: 12px;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+  padding-top: var(--s-3);
   border-top: 1px solid var(--stroke);
 }
 
@@ -611,20 +650,20 @@ body {
 
 /* ── Note kinds ───────────────────────────────────────────────────────────── */
 
-.kind-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.kind-row { display: flex; flex-wrap: wrap; gap: var(--s-1); }
 
 .kind-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--s-1);
   height: 26px;
-  padding: 0 10px;
+  padding: 0 var(--s-3);
   border: 0;
   border-radius: var(--r-pill);
   background: var(--field);
   color: var(--text-2);
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--t-caption);
   font-weight: 600;
   cursor: default;
   transition: background var(--fast), color var(--fast);
@@ -656,14 +695,14 @@ body {
 .secret-toggle {
   flex: none;
   height: 30px;
-  padding: 0 11px;
+  padding: 0 var(--s-3);
   border: 0;
   border-radius: var(--r-control);
   background: var(--field);
   box-shadow: inset 0 0 0 1px var(--stroke);
   color: var(--text-2);
   font: inherit;
-  font-size: 11.5px;
+  font-size: var(--t-caption);
   font-weight: 600;
   cursor: default;
   transition: color var(--fast), background var(--fast);
@@ -713,13 +752,13 @@ body {
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--s-1);
   height: 20px;
-  padding: 0 8px;
+  padding: 0 var(--s-2);
   border-radius: var(--r-pill);
   background: color-mix(in srgb, var(--chip, var(--text-3)) 14%, transparent);
   color: var(--chip, var(--text-2));
-  font-size: 11px;
+  font-size: var(--t-caption);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -736,14 +775,14 @@ body {
   align-items: center;
   justify-content: center;
   height: 28px;
-  padding: 0 12px;
+  padding: 0 var(--s-3);
   border: 0;
   border-radius: var(--r-control);
   background: var(--field);
   box-shadow: inset 0 0 0 1px var(--stroke);
   color: var(--text-1);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--t-small);
   font-weight: 550;
   cursor: default;
   white-space: nowrap;
@@ -764,12 +803,12 @@ body {
   z-index: 60;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px 8px 15px;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4);
   border-radius: var(--r-pill);
   background: var(--glass-strong);
   box-shadow: inset 0 0 0 1px var(--stroke-bright), var(--shadow-pop);
-  font-size: 12.5px;
+  font-size: var(--t-small);
   font-weight: 550;
   animation: toast-in 260ms var(--ease);
 }
@@ -781,13 +820,13 @@ body {
 
 .btn-update {
   height: 24px;
-  padding: 0 11px;
+  padding: 0 var(--s-3);
   border: 0;
   border-radius: var(--r-pill);
   background: var(--tint);
   color: #fff;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--t-small);
   font-weight: 600;
   cursor: default;
 }
@@ -815,10 +854,10 @@ body {
    that are worth a line. */
 .sync-badge {
   flex: none;
-  margin: 0 0 8px;
-  padding: 5px 10px;
+  margin: 0 0 var(--s-2);
+  padding: var(--s-1) var(--s-3);
   border-radius: 8px;
-  font-size: 11.5px;
+  font-size: var(--t-caption);
   font-weight: 500;
   color: var(--text-2);
   background: var(--glass-strong);
@@ -833,11 +872,11 @@ body {
    A phone has neither, and it has a notch and a home indicator instead. */
 @media (max-width: 520px) {
   .sheet {
-    padding: calc(env(safe-area-inset-top, 0px) + 14px) 12px 0;
+    padding: calc(env(safe-area-inset-top, 0px) + var(--s-3)) var(--s-3) 0;
   }
 
   .composer {
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--s-2));
   }
 
   /* Five tiles do not fit across a phone. Let them scroll sideways rather than
@@ -856,11 +895,11 @@ body {
 
   /* A finger is not a mouse pointer. */
   .check { width: 26px; height: 26px; }
-  .card-row { padding: 12px 12px; }
+  .card-row { padding: var(--s-3) var(--s-3); }
 
   /* iOS zooms the whole page in when a focused input is under 16px. */
   .composer input,
-  .detail-input { font-size: 16px; }
+  .detail-input { font-size: var(--t-input); }
 }
 
 /* No drag strip on a phone — there is no window to move. */
@@ -872,18 +911,18 @@ body {
    where wrapping would push the field around. Explanatory prose needs the
    opposite, so it gets its own class rather than a fight over one. */
 .field-note {
-  font-size: 11.5px;
+  font-size: var(--t-caption);
   line-height: 1.5;
   color: var(--text-3);
   white-space: normal;
 }
 
 .field-note code {
-  padding: 1px 4px;
+  padding: 1px var(--s-1);
   border-radius: 4px;
   background: var(--glass-strong);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: var(--t-caption);
 }
 
 /* Windows and Linux ──────────────────────────────────────────────────────── */
@@ -892,7 +931,7 @@ body {
    window controls are on the right and that headroom is just wasted space. */
 :root[data-platform='windows'] .sheet,
 :root[data-platform='linux'] .sheet {
-  padding-top: 16px;
+  padding-top: var(--s-4);
 }
 
 /* The drag strip has to stop short of the controls, which sit top-right. */
@@ -910,18 +949,18 @@ body {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding: 7px 8px 7px 12px;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
   border-radius: var(--r-card);
-  font-size: 12.5px;
+  font-size: var(--t-small);
   font-weight: 600;
   color: var(--text-1);
   background: var(--glass-strong);
   box-shadow: inset 0 0 0 1px var(--stroke-bright), var(--shadow-lift);
 }
 
-.select-bar .btn { padding: 5px 11px; font-size: 12px; }
+.select-bar .btn { padding: var(--s-1) var(--s-3); font-size: var(--t-small); }
 
 .card[data-selected] {
   background: color-mix(in srgb, var(--tint) 14%, var(--glass));
@@ -938,9 +977,9 @@ body {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 8px 0 2px;
-  padding: 7px 10px;
+  gap: var(--s-2);
+  margin: var(--s-3) 0 var(--s-3);
+  padding: var(--s-2) var(--s-3);
   border-radius: var(--r-card);
   background: var(--glass);
   box-shadow: inset 0 0 0 1px var(--stroke-bright);
@@ -958,7 +997,7 @@ body {
   background: transparent;
   color: var(--text-1);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--t-body);
   outline: none;
   -webkit-user-select: text;
   user-select: text;
@@ -974,7 +1013,7 @@ body {
   border-radius: 50%;
   color: var(--text-2);
   background: var(--glass-strong);
-  font-size: 15px;
+  font-size: var(--t-lead);
   line-height: 1;
   cursor: pointer;
 }
@@ -987,28 +1026,28 @@ body {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding: 7px 8px 7px 12px;
+  gap: var(--s-2);
+  margin-bottom: var(--s-2);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
   border-radius: var(--r-card);
-  font-size: 12.5px;
+  font-size: var(--t-small);
   font-weight: 600;
   color: var(--text-1);
   background: var(--glass-strong);
   box-shadow: inset 0 0 0 1px var(--stroke-bright), var(--shadow-lift);
 }
 
-.undo-bar .btn { padding: 5px 13px; font-size: 12px; color: var(--tint); }
+.undo-bar .btn { padding: var(--s-1) var(--s-3); font-size: var(--t-small); color: var(--tint); }
 
 @media (max-width: 520px) {
-  .search-input { font-size: 16px; }  /* iOS zooms anything smaller */
+  .search-input { font-size: var(--t-input); }  /* iOS zooms anything smaller */
 }
 
 /* Settings ───────────────────────────────────────────────────────────────── */
 
 .settings-heading {
-  margin: 14px 0 -2px;
-  font-size: 11px;
+  margin: var(--s-4) 0 var(--s-1);
+  font-size: var(--t-caption);
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1021,16 +1060,16 @@ body {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  padding: 7px 0;
-  font-size: 12.5px;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  font-size: var(--t-small);
   color: var(--text-2);
   border-bottom: 1px solid var(--stroke-bright);
 }
 
 .settings-row code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11.5px;
+  font-size: var(--t-caption);
   color: var(--text-1);
 }
 
@@ -1042,5 +1081,5 @@ body {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--s-1);
 }

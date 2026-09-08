@@ -39,6 +39,29 @@ svg {
   --green: #30d158;
   --tint: var(--blue);
 
+  /* ── Semantic colour ──────────────────────────────────────────────────────
+     The six above are hues; these are meanings. Use these at every call site.
+
+     Without them nothing said which colour meant what, so each use decided
+     again — and the bug UI was written against a `--red` that does not exist,
+     because "danger" had no name to reach for. It painted nothing and was
+     found by accident.
+
+     There is exactly one red and it is called pink. A second would be two. */
+  --primary: var(--blue);      /* selection, focus, the one live action */
+  --success: var(--green);     /* completed, connected, personal */
+  --warning: var(--orange);    /* offline, awaiting a check, not-yet-verified */
+  --danger: var(--pink);       /* delete, overdue, blocker, unworkable */
+  --info: var(--teal);         /* in progress */
+
+  /* Ink and veils that sit ON a filled accent — a selected tile, a blocker
+     badge, the armed send button. White on blue is right, but it was written
+     as a literal seven times, which meant seven separate decisions that could
+     drift apart. These are one decision. */
+  --on-accent: #ffffff;
+  --on-accent-dim: rgba(255, 255, 255, 0.85);
+  --on-accent-veil: rgba(255, 255, 255, 0.22);
+
   --r-card: 14px;
   --r-control: 9px;
   --r-pill: 999px;
@@ -319,7 +342,7 @@ body {
 .tile[aria-current='true'] {
   background: var(--tile);
   box-shadow: none;
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .tile-top {
@@ -336,11 +359,11 @@ body {
   height: 21px;
   border-radius: 50%;
   background: var(--tile);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* Selected, the tile itself carries the colour, so the badge inverts. */
-.tile[aria-current='true'] .tile-icon { background: rgba(255, 255, 255, 0.22); }
+.tile[aria-current='true'] .tile-icon { background: var(--on-accent-veil); }
 
 .tile-count {
   font-size: var(--t-small);
@@ -349,7 +372,7 @@ body {
   color: var(--text-2);
 }
 
-.tile[aria-current='true'] .tile-count { color: rgba(255, 255, 255, 0.85); }
+.tile[aria-current='true'] .tile-count { color: var(--on-accent-dim); }
 
 .tile-label {
   font-size: var(--t-caption);
@@ -540,7 +563,7 @@ body {
 .composer-send:disabled { cursor: default; opacity: 0.45; }
 
 .composer-send[data-ready='true'] {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--tint);
 }
 
@@ -736,7 +759,7 @@ body {
 .check[data-done='true'] {
   border-color: var(--green);
   background: var(--green);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .check svg {
@@ -790,8 +813,8 @@ body {
 }
 
 .btn:hover { background: var(--glass-hover); }
-.btn-danger { color: var(--pink); }
-.btn-danger:hover { background: color-mix(in srgb, var(--pink) 13%, transparent); }
+.btn-danger { color: var(--danger); }
+.btn-danger:hover { background: color-mix(in srgb, var(--danger) 13%, transparent); }
 
 /* ── Update banner ────────────────────────────────────────────────────────── */
 
@@ -824,7 +847,7 @@ body {
   border: 0;
   border-radius: var(--r-pill);
   background: var(--tint);
-  color: #fff;
+  color: var(--on-accent);
   font: inherit;
   font-size: var(--t-small);
   font-weight: 600;
@@ -864,7 +887,7 @@ body {
   box-shadow: inset 0 0 0 1px var(--stroke-bright);
 }
 
-.sync-badge[data-state='offline'] { color: var(--orange); }
+.sync-badge[data-state='offline'] { color: var(--warning); }
 
 /* Phones ─────────────────────────────────────────────────────────────────── */
 
@@ -1100,8 +1123,8 @@ body {
   background: var(--glass-strong);
 }
 
-.sev[data-sev='blocker'] { color: #fff; background: var(--pink); }
-.sev[data-sev='major'] { color: var(--orange); background: color-mix(in srgb, var(--orange) 16%, transparent); }
+.sev[data-sev='blocker'] { color: #fff; background: var(--danger); }
+.sev[data-sev='major'] { color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
 .sev[data-sev='minor'] { color: var(--text-2); }
 .sev[data-sev='cosmetic'] { color: var(--text-3); }
 
@@ -1114,8 +1137,8 @@ body {
   font-weight: 600;
 }
 
-.card-state[data-kind='awaiting'] { color: var(--orange); }
-.card-state[data-kind='unworkable'] { color: var(--pink); }
+.card-state[data-kind='awaiting'] { color: var(--warning); }
+.card-state[data-kind='unworkable'] { color: var(--danger); }
 .card-state[data-kind='reopened'] { color: var(--text-3); }
 
 .bug-panel { margin-top: var(--s-3); }

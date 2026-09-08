@@ -518,7 +518,7 @@ function BugPanel({
         )}
       </div>
 
-      {refused && <div className="field-note" style={{ color: 'var(--pink)' }}>{refused}</div>}
+      {refused && <div className="field-note" style={{ color: 'var(--danger)' }}>{refused}</div>}
     </div>
   );
 }

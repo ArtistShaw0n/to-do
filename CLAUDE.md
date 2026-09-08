@@ -243,7 +243,7 @@ counts on its own; your job is the prose above them.
 node bin/todo.mjs digest --write "…markdown…"
 ```
 
-Write it **in his register** — see *Writing Bengali to him* in §7; the idiom
+Write it **in his register** — see *Writing Bengali to him* in §8; the idiom
 rule matters here most of all. Keep it short: 3–6 lines. Lead with what matters
 today, name the single most important task, flag anything rotting.
 
@@ -355,13 +355,50 @@ Claude Code ──▶ bin/todo.mjs ──▶ data/tasks.json ◀── Rust fs-w
 | `bin/vault.mjs` | vault IO, date parsing, stats |
 | `src/lib/` | types, vault bridge, mutations, React hook |
 | `src/components/` | UI |
-| `src/styles/global.css` | the whole Liquid Glass design system |
+| `src/styles/global.css` | every token and every component's styles |
+| `scripts/check-design-system.mjs` | the gate that keeps them honest |
 | `src-tauri/src/lib.rs` | storage, watcher, tray, hotkey |
 | `scripts/make-icon.mjs` | regenerates the icon from code |
 
 ---
 
-## 6. Shipping an update
+## 6. The design system
+
+Every colour, size, space and duration comes from a token in
+`src/styles/global.css`. Nothing in this project types a raw number for
+spacing, a font size, or a colour — and `pnpm check:design` fails the build if
+anything does.
+
+```bash
+pnpm check:design            # three checks, run before every build
+node scripts/check-design-system.mjs --write   # accept a token change
+```
+
+The three checks, and why each exists:
+
+1. **No raw spacing or type values.** The stylesheet once held twenty different
+   spacing values and eleven type sizes, because every number was chosen where
+   it was written. Use `--s-1…--s-6` and `--t-caption…--t-hero`.
+2. **No colour outside the palette.** Use the semantic names — `--primary`,
+   `--success`, `--warning`, `--danger`, `--info`, and `--on-accent` for ink on
+   a filled accent. The bug UI was once written against a `--red` that does not
+   exist and painted nothing.
+3. **The token inventory matches its snapshot.** Add or remove a token and the
+   build fails until the published design system is updated to match, then
+   `--write` accepts the new set. This is what stops the document quietly
+   describing a system that no longer exists.
+
+**Adding anything new means adding it to the system first.** A new component
+uses existing tokens; if it genuinely needs a value none of them provide, the
+token is added, the design system canvas is updated, and only then does the
+snapshot move. The order matters — doing it the other way round is how the two
+drift apart.
+
+The published system: https://claude.ai/code/artifact/861f0314-d8e4-4741-b005-ef65c326b712
+
+---
+
+## 7. Shipping an update
 
 The app auto-updates from GitHub Releases, verified against a minisign key.
 
@@ -408,7 +445,7 @@ every installed copy** — there is no recovery, only a manual reinstall.
 
 ---
 
-## 7. Style
+## 8. Style
 
 - Task titles: English, imperative, specific. "Send the invoice to the client",
   not "invoice".

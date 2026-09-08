@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { NOTE_KIND_META, type Note, type Task } from './lib/types';
 import { isOverdue, longDate, relativeDue } from './lib/dates';
 import {
@@ -41,6 +41,26 @@ export default function App() {
   const [configured] = useState(() => inTauri || !!hasSyncConfig());
   const [view, setView] = useState<View>('all');
   const [openId, setOpenId] = useState<string | null>(null);
+
+  /** Tapping the open card closes it again; before this it re-opened itself. */
+  const toggleOpen = (id: string) => setOpenId((cur) => (cur === id ? null : id));
+
+  /**
+   * Long-press selection.
+   *
+   * Empty means normal browsing. Once anything is selected a tap picks and
+   * unpicks rather than opening, which is how every list on a phone behaves.
+   */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const selecting = selected.size > 0;
+
+  const toggleSelected = (id: string) => setSelected((cur) => {
+    const next = new Set(cur);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
+
+  const clearSelection = () => setSelected(new Set());
   const [update, setUpdate] = useState<{ version: string; install: () => Promise<void> } | null>(null);
   /** Tasks currently being rewritten by Claude. Deliberately not persisted:
       a task interrupted by a quit is simply left as it was typed. */
@@ -277,7 +297,30 @@ export default function App() {
           ))}
         </div>
 
-        <div className="sheet-scroll" onClick={() => setOpenId(null)}>
+        {selecting && (
+          <div className="select-bar">
+            <span>{selected.size} selected</span>
+            <div style={{ flex: 1 }} />
+            <button className="btn" onClick={clearSelection}>Cancel</button>
+            <button
+              className="btn btn-danger"
+              onClick={() => {
+                void mutate((v) => [...selected].reduce(
+                  (acc, id) => (v.notes.some((n) => n.id === id)
+                    ? deleteNote(acc, id)
+                    : deleteTask(acc, id)),
+                  v,
+                ));
+                clearSelection();
+                setOpenId(null);
+              }}
+            >
+              Delete {selected.size}
+            </button>
+          </div>
+        )}
+
+        <div className="sheet-scroll" onClick={() => { setOpenId(null); clearSelection(); }}>
           {items.length === 0 ? (
             <div className="empty">
               <div className="empty-mark">✓</div>
@@ -292,7 +335,10 @@ export default function App() {
                     key={item.id}
                     note={item}
                     open={openId === item.id}
-                    onOpen={() => setOpenId(item.id)}
+                    selecting={selecting}
+                    selected={selected.has(item.id)}
+                    onPick={() => toggleSelected(item.id)}
+                    onOpen={() => toggleOpen(item.id)}
                     onPatch={(patch) => void mutate((v) => updateNote(v, item.id, patch))}
                     onDelete={() => {
                       void mutate((v) => deleteNote(v, item.id));
@@ -306,7 +352,10 @@ export default function App() {
                     vault={vault}
                     busy={busy.has(item.id)}
                     open={openId === item.id}
-                    onOpen={() => setOpenId(item.id)}
+                    selecting={selecting}
+                    selected={selected.has(item.id)}
+                    onPick={() => toggleSelected(item.id)}
+                    onOpen={() => toggleOpen(item.id)}
                     onToggle={() => void mutate((v) => toggleDone(v, item.id))}
                     onPatch={(patch) => void mutate((v) => updateTask(v, item.id, patch))}
                     onDelete={() => {
@@ -333,34 +382,87 @@ export default function App() {
   );
 }
 
+/**
+ * Press and hold to start selecting.
+ *
+ * 450ms is the usual threshold: long enough that a scroll flick does not fire
+ * it, short enough not to feel stuck. Any movement cancels, since a drag on a
+ * list is a scroll, not a press.
+ */
+function useLongPress(onLongPress: () => void, onTap: () => void) {
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const fired = useRef(false);
+  const start = useRef<{ x: number; y: number } | null>(null);
+
+  const cancel = () => {
+    clearTimeout(timer.current);
+    start.current = null;
+  };
+
+  return {
+    onPointerDown: (e: React.PointerEvent) => {
+      fired.current = false;
+      start.current = { x: e.clientX, y: e.clientY };
+      timer.current = setTimeout(() => {
+        fired.current = true;
+        cancel();
+        onLongPress();
+      }, 450);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (!start.current) return;
+      if (Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) > 8) cancel();
+    },
+    onPointerUp: cancel,
+    onPointerCancel: cancel,
+    onClick: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      // The click that follows a long press must not also count as a tap.
+      if (fired.current) { fired.current = false; return; }
+      onTap();
+    },
+  };
+}
+
 // Cards ──────────────────────────────────────────────────────────────────────
 
 function TaskCard({
-  task, vault, busy, open, onOpen, onToggle, onPatch, onDelete,
+  task, vault, busy, open, selecting, selected, onPick, onOpen, onToggle, onPatch, onDelete,
 }: {
   task: Task;
   vault: Parameters<typeof TaskDetail>[0]['vault'];
   busy: boolean;
   open: boolean;
+  selecting: boolean;
+  selected: boolean;
+  onPick: () => void;
   onOpen: () => void;
   onToggle: () => void;
   onPatch: (patch: Partial<Task>) => void;
   onDelete: () => void;
 }) {
   const done = task.status === 'done' || task.status === 'cancelled';
+  // While anything is selected, a tap picks rather than opens.
+  const press = useLongPress(onPick, selecting ? onPick : onOpen);
   const due = relativeDue(task.due);
   const late = !done && isOverdue(task.due);
   const color = projectColor(vault, task.project);
 
   return (
-    <div className="card" data-open={open} data-done={done} data-busy={busy || undefined}
-      onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+    <div
+      className="card"
+      data-open={open}
+      data-done={done}
+      data-busy={busy || undefined}
+      data-selected={selected || undefined}
+      {...press}
+    >
       <div className="card-row">
         <button
           className="check"
           data-done={done}
           aria-label={done ? `Reopen ${task.title}` : `Complete ${task.title}`}
-          onClick={(e) => { e.stopPropagation(); onToggle(); }}
+          onClick={(e) => { e.stopPropagation(); selecting ? onPick() : onToggle(); }}
         >
           <CheckGlyph />
         </button>
@@ -393,19 +495,23 @@ function TaskCard({
 }
 
 function NoteCard({
-  note, open, onOpen, onPatch, onDelete,
+  note, open, selecting, selected, onPick, onOpen, onPatch, onDelete,
 }: {
   note: Note;
   open: boolean;
+  selecting: boolean;
+  selected: boolean;
+  onPick: () => void;
   onOpen: () => void;
   onPatch: (patch: Partial<Note>) => void;
   onDelete: () => void;
 }) {
+  const press = useLongPress(onPick, selecting ? onPick : onOpen);
   const meta = NOTE_KIND_META[note.kind];
   const subtitle = note.username || note.url || note.body.split('\n')[0] || meta.label;
 
   return (
-    <div className="card" data-open={open} onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+    <div className="card" data-open={open} data-selected={selected || undefined} {...press}>
       <div className="card-row">
         <span className="note-badge" style={{ '--kind': meta.color } as React.CSSProperties}>
           <NoteGlyph kind={note.kind} size={15} />

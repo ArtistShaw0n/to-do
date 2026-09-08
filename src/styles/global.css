@@ -900,3 +900,34 @@ body {
 :root[data-platform='linux'] .drag-strip {
   right: 140px;
 }
+
+/* Selection ──────────────────────────────────────────────────────────────── */
+
+/* Press and hold a card to start selecting, then tap to add and remove. The
+   bar only exists while something is picked, so nothing is taken from the list
+   the rest of the time. */
+.select-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 7px 8px 7px 12px;
+  border-radius: var(--r-card);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-1);
+  background: var(--glass-strong);
+  box-shadow: inset 0 0 0 1px var(--stroke-bright), var(--shadow-lift);
+}
+
+.select-bar .btn { padding: 5px 11px; font-size: 12px; }
+
+.card[data-selected] {
+  background: color-mix(in srgb, var(--tint) 14%, var(--glass));
+  box-shadow: inset 0 0 0 1.5px var(--tint), var(--shadow-card);
+}
+
+/* Holding a card should feel like it is being held. */
+.card { -webkit-touch-callout: none; }
+.card:active { transform: scale(0.995); }

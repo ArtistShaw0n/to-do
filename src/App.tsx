@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NOTE_KIND_META, type Note, type Task } from './lib/types';
-import { isOverdue, longDate, relativeDue } from './lib/dates';
+import { isOverdue, longDate, relativeDue, todayISO } from './lib/dates';
 import {
   addNote, addTask, deleteNote, deleteTask, isOpen, newId, projectColor,
   searchNotes, searchTasks, sortNotes, sortTasks, toggleDone, updateNote, updateTask,
@@ -17,6 +17,8 @@ import {
 } from './components/glyphs';
 import { SyncBadge, SyncSetup, hasSyncConfig } from './components/SyncSetup';
 import { checkReport, isBug, sortBugs } from './lib/bugs';
+import { Brief } from './components/Brief';
+import { briefDismissed, briefFor, dismissBrief } from './lib/digest';
 import { Settings } from './components/Settings';
 
 type ThemeMode = 'system' | 'light' | 'dark';
@@ -44,6 +46,11 @@ export default function App() {
   const inTauri = '__TAURI_INTERNALS__' in window;
   const [configured] = useState(() => inTauri || !!hasSyncConfig());
   const [showSettings, setShowSettings] = useState(false);
+
+  // The day's brief, shown once until it is dismissed. Tomorrow's arrives on
+  // its own because the dismissal records the date, not a flag.
+  const [briefRead, setBriefRead] = useState(() => briefDismissed(todayISO()));
+  const brief = vault ? briefFor(vault) : null;
   const [view, setView] = useState<View>('all');
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -376,6 +383,13 @@ export default function App() {
             </button>
           ))}
         </div>
+
+        {view === 'all' && brief && !briefRead && !selecting && (
+          <Brief
+            digest={brief}
+            onDismiss={() => { dismissBrief(brief.date); setBriefRead(true); }}
+          />
+        )}
 
         <div className="search-row">
           <span className="search-icon"><SearchGlyph /></span>

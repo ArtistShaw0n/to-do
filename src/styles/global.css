@@ -1142,3 +1142,94 @@ body {
 .card-state[data-kind='reopened'] { color: var(--text-3); }
 
 .bug-panel { margin-top: var(--s-3); }
+
+/* Daily brief ────────────────────────────────────────────────────────────── */
+
+/* Sits above the list, below the tiles. Prominent surface rather than a card,
+   so it reads as something said to you rather than another row to work
+   through — and it takes the group step from what follows, not the item step,
+   because it is a different kind of thing from the list. */
+.brief {
+  flex: none;
+  margin-bottom: var(--s-3);
+  padding: var(--s-3) var(--s-3) var(--s-3);
+  border-radius: var(--r-card);
+  background: var(--glass-strong);
+  box-shadow: inset 0 0 0 1px var(--stroke-bright), var(--shadow-card);
+}
+
+.brief-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  margin-bottom: var(--s-2);
+}
+
+.brief-mark {
+  display: grid;
+  place-items: center;
+  color: var(--primary);
+}
+
+.brief-title {
+  font-size: var(--t-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.brief-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--r-pill);
+  color: var(--text-3);
+  background: transparent;
+  cursor: pointer;
+  transition: color var(--fast), background var(--fast);
+}
+
+.brief-close:hover { color: var(--text-1); background: var(--field); }
+
+.brief-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.brief-p {
+  margin: 0;
+  font-size: var(--t-body);
+  line-height: 1.55;
+  color: var(--text-1);
+}
+
+.brief-list {
+  margin: 0;
+  padding-left: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: var(--t-body);
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+/* Task titles quoted in the brief. Monospace so a name lifted from the list
+   reads as the same identifier it is in the list. */
+.brief-code {
+  padding: 1px var(--s-1);
+  border-radius: var(--r-control);
+  background: var(--field);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--t-small);
+  color: var(--text-1);
+}
+
+@media (max-width: 520px) {
+  .brief-close { width: 26px; height: 26px; }
+}

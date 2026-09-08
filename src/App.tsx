@@ -3,7 +3,7 @@ import { NOTE_KIND_META, type Note, type Task } from './lib/types';
 import { isOverdue, longDate, relativeDue } from './lib/dates';
 import {
   addNote, addTask, deleteNote, deleteTask, isOpen, newId, projectColor,
-  searchNotes, sortNotes, sortTasks, toggleDone, updateNote, updateTask,
+  searchNotes, searchTasks, sortNotes, sortTasks, toggleDone, updateNote, updateTask,
 } from './lib/vault';
 import {
   applyItems, buildPrompt, looksLikeSecret, noteFields, noteLocally, normaliseLocally,
@@ -12,8 +12,11 @@ import {
 } from './lib/normalise';
 import { useVault } from './lib/useVault';
 import { NoteDetail, TaskDetail } from './components/DetailPane';
-import { CheckGlyph, NoteGlyph, SendGlyph, ViewGlyph, type ViewGlyphName } from './components/glyphs';
+import {
+  CheckGlyph, NoteGlyph, SearchGlyph, SendGlyph, ViewGlyph, type ViewGlyphName,
+} from './components/glyphs';
 import { SyncBadge, SyncSetup, hasSyncConfig } from './components/SyncSetup';
+import { Settings } from './components/Settings';
 
 type ThemeMode = 'system' | 'light' | 'dark';
 const THEME_ORDER: ThemeMode[] = ['system', 'light', 'dark'];
@@ -39,6 +42,7 @@ export default function App() {
   // show and nowhere to put anything typed into it.
   const inTauri = '__TAURI_INTERNALS__' in window;
   const [configured] = useState(() => inTauri || !!hasSyncConfig());
+  const [showSettings, setShowSettings] = useState(false);
   const [view, setView] = useState<View>('all');
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -61,6 +65,50 @@ export default function App() {
   });
 
   const clearSelection = () => setSelected(new Set());
+
+  /**
+   * What was just deleted, and how to put it back.
+   *
+   * Deleting is the one action here with no natural way back, and selecting
+   * several at once makes a slip expensive. The rows are kept whole rather than
+   * their ids, so restoring returns exactly what was removed.
+   */
+  const [undo, setUndo] = useState<{ tasks: Task[]; notes: Note[] } | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const rememberForUndo = (tasks: Task[], notes: Note[]) => {
+    clearTimeout(undoTimer.current);
+    setUndo({ tasks, notes });
+    // Long enough to notice and reach for, short enough not to sit there.
+    undoTimer.current = setTimeout(() => setUndo(null), 8000);
+  };
+
+  const removeIds = (ids: string[]) => {
+    if (!vault) return;
+    const tasks = vault.tasks.filter((t) => ids.includes(t.id));
+    const notes = vault.notes.filter((n) => ids.includes(n.id));
+    void mutate((v) => ids.reduce(
+      (acc, id) => (v.notes.some((n) => n.id === id) ? deleteNote(acc, id) : deleteTask(acc, id)),
+      v,
+    ));
+    rememberForUndo(tasks, notes);
+    clearSelection();
+    setOpenId(null);
+  };
+
+  const restore = () => {
+    if (!undo) return;
+    void mutate((v) => ({
+      ...v,
+      tasks: [...v.tasks, ...undo.tasks],
+      notes: [...v.notes, ...undo.notes],
+    }));
+    clearTimeout(undoTimer.current);
+    setUndo(null);
+  };
+
+  /** Free-text search over everything on screen. */
+  const [query, setQuery] = useState('');
   const [update, setUpdate] = useState<{ version: string; install: () => Promise<void> } | null>(null);
   /** Tasks currently being rewritten by Claude. Deliberately not persisted:
       a task interrupted by a quit is simply left as it was typed. */
@@ -125,19 +173,23 @@ export default function App() {
 
   const items = useMemo<(Task | Note)[]>(() => {
     if (!vault) return [];
-    if (view === 'notes') return sortNotes(searchNotes(vault.notes, ''));
+    if (view === 'notes') return sortNotes(searchNotes(vault.notes, query));
 
     const live = vault.tasks.filter(isOpen);
-    switch (view) {
-      case 'personal': return sortTasks(live.filter((t) => t.project === PERSONAL));
-      case 'bugs': return sortTasks(live.filter((t) => t.tags.includes('bug')));
-      case 'done':
-        return vault.tasks
-          .filter((t) => !isOpen(t))
-          .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''));
-      default: return sortTasks(live);
-    }
-  }, [vault, view]);
+    const chosen = (() => {
+      switch (view) {
+        case 'personal': return sortTasks(live.filter((t) => t.project === PERSONAL));
+        case 'bugs': return sortTasks(live.filter((t) => t.tags.includes('bug')));
+        case 'done':
+          return vault.tasks
+            .filter((t) => !isOpen(t))
+            .sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''));
+        default: return sortTasks(live);
+      }
+    })();
+
+    return searchTasks(chosen, query);
+  }, [vault, view, query]);
 
   if (error && !vault) {
     return (
@@ -148,6 +200,16 @@ export default function App() {
     );
   }
   if (!configured) return <SyncSetup onDone={() => window.location.reload()} />;
+  if (showSettings) {
+    return (
+      <Settings
+        sync={sync}
+        theme={theme}
+        onTheme={setTheme}
+        onClose={() => setShowSettings(false)}
+      />
+    );
+  }
   if (!vault) return <div style={{ height: '100%' }} />;
 
   const themeLabel = theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark';
@@ -252,6 +314,18 @@ export default function App() {
 
           <button
             className="theme-btn"
+            title="Settings"
+            aria-label="Settings"
+            onClick={() => setShowSettings(true)}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <circle cx="8" cy="8" r="2.4" />
+              <path d="M8 1.6v1.7M8 12.7v1.7M14.4 8h-1.7M3.3 8H1.6M12.5 3.5l-1.2 1.2M4.7 11.3l-1.2 1.2M12.5 12.5l-1.2-1.2M4.7 4.7L3.5 3.5" />
+            </svg>
+          </button>
+
+          <button
+            className="theme-btn"
             title={`Appearance: ${themeLabel}`}
             aria-label={`Appearance: ${themeLabel}. Click to change.`}
             onClick={() =>
@@ -297,6 +371,25 @@ export default function App() {
           ))}
         </div>
 
+        <div className="search-row">
+          <span className="search-icon"><SearchGlyph /></span>
+          <input
+            className="search-input"
+            value={query}
+            placeholder={`Search ${view === 'notes' ? 'notes' : 'tasks'}…`}
+            spellCheck={false}
+            autoCapitalize="off"
+            enterKeyHint="search"
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setQuery(''); }}
+          />
+          {query && (
+            <button className="search-clear" aria-label="Clear search" onClick={() => setQuery('')}>
+              ×
+            </button>
+          )}
+        </div>
+
         {selecting && (
           <div className="select-bar">
             <span>{selected.size} selected</span>
@@ -304,16 +397,7 @@ export default function App() {
             <button className="btn" onClick={clearSelection}>Cancel</button>
             <button
               className="btn btn-danger"
-              onClick={() => {
-                void mutate((v) => [...selected].reduce(
-                  (acc, id) => (v.notes.some((n) => n.id === id)
-                    ? deleteNote(acc, id)
-                    : deleteTask(acc, id)),
-                  v,
-                ));
-                clearSelection();
-                setOpenId(null);
-              }}
+              onClick={() => removeIds([...selected])}
             >
               Delete {selected.size}
             </button>
@@ -340,10 +424,7 @@ export default function App() {
                     onPick={() => toggleSelected(item.id)}
                     onOpen={() => toggleOpen(item.id)}
                     onPatch={(patch) => void mutate((v) => updateNote(v, item.id, patch))}
-                    onDelete={() => {
-                      void mutate((v) => deleteNote(v, item.id));
-                      setOpenId(null);
-                    }}
+                    onDelete={() => removeIds([item.id])}
                   />
                 ) : (
                   <TaskCard
@@ -358,16 +439,23 @@ export default function App() {
                     onOpen={() => toggleOpen(item.id)}
                     onToggle={() => void mutate((v) => toggleDone(v, item.id))}
                     onPatch={(patch) => void mutate((v) => updateTask(v, item.id, patch))}
-                    onDelete={() => {
-                      void mutate((v) => deleteTask(v, item.id));
-                      setOpenId(null);
-                    }}
+                    onDelete={() => removeIds([item.id])}
                   />
                 ),
               )}
             </div>
           )}
         </div>
+
+        {undo && (
+          <div className="undo-bar">
+            <span>
+              {undo.tasks.length + undo.notes.length} deleted
+            </span>
+            <div style={{ flex: 1 }} />
+            <button className="btn" onClick={restore}>Undo</button>
+          </div>
+        )}
 
         {view !== 'done' && <Composer noun={view === 'notes' ? 'note' : 'task'} onAdd={add} />}
       </main>

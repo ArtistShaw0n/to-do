@@ -251,6 +251,25 @@ export function addNote(vault: Vault, draft: Partial<Note> & { title: string }):
   };
 }
 
+/**
+ * Free-text search over a task's own words.
+ *
+ * Deliberately includes `originalInput`: the title is clean English, but what
+ * he remembers typing is often the Banglish he actually wrote, and searching
+ * for that should find it.
+ */
+export function searchTasks(tasks: Task[], query: string): Task[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return tasks;
+  const terms = q.split(/\s+/);
+  return tasks.filter((t) => {
+    const hay = `${t.title} ${t.notes ?? ''} ${t.project ?? ''} ${t.tags.join(' ')} ${t.originalInput ?? ''}`
+      .toLowerCase();
+    // Every word must appear, so extra words narrow rather than widen.
+    return terms.every((term) => hay.includes(term));
+  });
+}
+
 /** Free-text search across every field, the way a password manager searches. */
 export function searchNotes(notes: Note[], query: string): Note[] {
   const q = query.trim().toLowerCase();

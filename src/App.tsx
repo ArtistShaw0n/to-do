@@ -16,6 +16,7 @@ import {
   CheckGlyph, NoteGlyph, SearchGlyph, SendGlyph, ViewGlyph, type ViewGlyphName,
 } from './components/glyphs';
 import { SyncBadge, SyncSetup, hasSyncConfig } from './components/SyncSetup';
+import { checkReport, isBug, sortBugs } from './lib/bugs';
 import { Settings } from './components/Settings';
 
 type ThemeMode = 'system' | 'light' | 'dark';
@@ -179,7 +180,9 @@ export default function App() {
     const chosen = (() => {
       switch (view) {
         case 'personal': return sortTasks(live.filter((t) => t.project === PERSONAL));
-        case 'bugs': return sortTasks(live.filter((t) => t.tags.includes('bug')));
+        // Worst damage first, then urgency — the order someone works through
+        // a bug list in, not the order the bugs arrived in.
+        case 'bugs': return sortBugs(live.filter((t) => t.tags.includes('bug')));
         case 'done':
           return vault.tasks
             .filter((t) => !isOpen(t))
@@ -533,6 +536,12 @@ function TaskCard({
   onDelete: () => void;
 }) {
   const done = task.status === 'done' || task.status === 'cancelled';
+  const bug = isBug(task);
+  // A fixed bug is not a finished one — it is waiting for somebody to check it,
+  // and that queue is the one that silently goes stale.
+  const awaiting = bug && task.status === 'fixed';
+  // A report with no steps cannot be acted on, however long it sits there.
+  const unworkable = bug && !done && checkReport(task).length > 0;
   // While anything is selected, a tap picks rather than opens.
   const press = useLongPress(onPick, selecting ? onPick : onOpen);
   const due = relativeDue(task.due);
@@ -560,6 +569,21 @@ function TaskCard({
 
         <div className="card-main">
           <div className="card-title">{task.title}</div>
+          {awaiting && (
+            <div className="card-state" data-kind="awaiting">
+              Fixed in {task.fixedIn ?? '?'} — nobody has checked it yet
+            </div>
+          )}
+          {unworkable && (
+            <div className="card-state" data-kind="unworkable">
+              Cannot be worked on: {checkReport(task)[0].message}
+            </div>
+          )}
+          {task.reopenCount ? (
+            <div className="card-state" data-kind="reopened">
+              Reopened {task.reopenCount}×
+            </div>
+          ) : null}
           {task.notes && !done && <div className="card-notes">{task.notes}</div>}
           {(task.project || task.tags.length > 0) && !done && (
             <div className="card-meta">
@@ -573,6 +597,9 @@ function TaskCard({
           )}
         </div>
 
+        {bug && task.severity && !done && (
+          <span className="sev" data-sev={task.severity}>{task.severity}</span>
+        )}
         {due && !done && <span className="card-due" data-late={late}>{due}</span>}
       </div>
 

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { NOTE_KINDS, NOTE_KIND_META, type Note, type NoteKind, type Task, type Vault } from '../lib/types';
+import {
+  NOTE_KINDS, NOTE_KIND_META, SEVERITIES,
+  type Note, type NoteKind, type Severity, type Task, type Vault,
+} from '../lib/types';
+import { checkReport, isBug, moveBug } from '../lib/bugs';
 import { relativeDue } from '../lib/dates';
 import { projectColor } from '../lib/vault';
 import { NoteGlyph } from './glyphs';
@@ -169,6 +173,8 @@ export function TaskDetail({
           {task.tags.map((t) => <span key={t} className="chip chip-tag">{t}</span>)}
         </div>
       )}
+
+      {isBug(task) && <BugPanel task={task} onPatch={onPatch} />}
 
       {task.originalInput && <div className="detail-raw">“{task.originalInput}”</div>}
 
@@ -387,5 +393,132 @@ function CopyButton({ value }: { value: string }) {
     >
       {copied ? 'Copied' : 'Copy'}
     </button>
+  );
+}
+
+
+// ── Bugs ─────────────────────────────────────────────────────────────────────
+
+/**
+ * The bug fields, and the only moves the rules allow from where it stands.
+ *
+ * The buttons are built from `moveBug` rather than hard-coded, so what the
+ * screen offers and what the rules permit cannot drift apart — and when a move
+ * is refused, the reason is shown rather than the button quietly doing nothing.
+ */
+function BugPanel({
+  task,
+  onPatch,
+}: {
+  task: Task;
+  onPatch: (patch: Partial<Task>) => void;
+}) {
+  const [who, setWho] = useState('');
+  const [build, setBuild] = useState(task.fixedIn ?? '');
+  const [refused, setRefused] = useState<string | null>(null);
+
+  const complaints = checkReport(task);
+
+  const attempt = (to: Task['status']) => {
+    const result = moveBug(task, { to, by: who.trim(), fixedIn: build.trim() });
+    if (!result.ok) { setRefused(result.reason ?? 'Not allowed.'); return; }
+    setRefused(null);
+    const { id: _id, ...patch } = result.task!;
+    onPatch(patch);
+  };
+
+  return (
+    <div className="bug-panel">
+      <div className="settings-heading">Bug</div>
+
+      {complaints.length > 0 && (
+        <div className="field-note" style={{ color: 'var(--orange)' }}>
+          {complaints.map((c) => c.message).join(' ')}
+        </div>
+      )}
+
+      <label className="detail-field">
+        <span>Severity — how much damage, not how soon</span>
+        <div className="kind-row">
+          {SEVERITIES.map((sv: Severity) => (
+            <button
+              key={sv}
+              className="kind-chip"
+              aria-pressed={task.severity === sv}
+              style={{ '--kind': 'var(--tint)' } as React.CSSProperties}
+              onClick={() => onPatch({ severity: sv })}
+            >
+              {sv}
+            </button>
+          ))}
+        </div>
+      </label>
+
+      <Field label="Screen" value={task.menu ?? ''} onChange={(v) => onPatch({ menu: v })}
+        onCommit={() => {}} />
+
+      <label className="detail-field">
+        <span>Steps to reproduce</span>
+        <textarea
+          className="detail-input detail-textarea"
+          rows={3}
+          defaultValue={task.steps ?? ''}
+          placeholder={'1. …\n2. …'}
+          onBlur={(e) => onPatch({ steps: e.target.value.trim() || undefined })}
+        />
+      </label>
+
+      <Field label="Expected instead" value={task.expected ?? ''}
+        onChange={(v) => onPatch({ expected: v })} onCommit={() => {}} />
+      <Field label="Browser / device / build" value={task.environment ?? ''}
+        onChange={(v) => onPatch({ environment: v })} onCommit={() => {}} />
+      <Field label="Evidence" value={task.evidenceUrl ?? ''}
+        onChange={(v) => onPatch({ evidenceUrl: v })} onCommit={() => {}} />
+      <Field label="Reported by" value={task.reportedBy ?? ''}
+        onChange={(v) => onPatch({ reportedBy: v })} onCommit={() => {}} />
+
+      <div className="settings-heading">Where it stands</div>
+
+      <div className="settings-row">
+        <span>Status</span><code>{task.status}</code>
+      </div>
+      {task.fixedIn && <div className="settings-row"><span>Fixed in</span><code>{task.fixedIn}</code></div>}
+      {task.fixedBy && <div className="settings-row"><span>Fixed by</span><code>{task.fixedBy}</code></div>}
+      {task.verifiedBy && <div className="settings-row"><span>Checked by</span><code>{task.verifiedBy}</code></div>}
+      {task.reopenCount ? (
+        <div className="settings-row"><span>Reopened</span><code>{task.reopenCount}×</code></div>
+      ) : null}
+
+      <label className="detail-field">
+        <span>Your name</span>
+        <input className="detail-input" value={who} placeholder="who is doing this"
+          onChange={(e) => setWho(e.target.value)} />
+      </label>
+
+      {(task.status === 'todo' || task.status === 'doing') && (
+        <label className="detail-field">
+          <span>Build the fix went into</span>
+          <input className="detail-input" value={build} placeholder="v2.4.1"
+            onChange={(e) => setBuild(e.target.value)} />
+        </label>
+      )}
+
+      <div className="detail-inline" style={{ flexWrap: 'wrap' }}>
+        {task.status !== 'doing' && task.status !== 'fixed' && task.status !== 'done' && (
+          <button className="btn" onClick={() => attempt('doing')}>Start</button>
+        )}
+        {(task.status === 'todo' || task.status === 'doing') && (
+          <button className="btn" onClick={() => attempt('fixed')}>Mark fixed</button>
+        )}
+        {task.status === 'fixed' && (
+          <button className="btn" onClick={() => attempt('done')}>I checked it — close</button>
+        )}
+        {(task.status === 'fixed' || task.status === 'done') && (
+          <button className="btn" onClick={() => attempt('todo')}>Reopen</button>
+        )}
+      </div>
+
+      {refused && <div className="field-note" style={{ color: 'var(--pink)' }}>{refused}</div>}
+    </div>
   );
 }

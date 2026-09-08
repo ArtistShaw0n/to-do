@@ -65,7 +65,7 @@ export function SyncSetup({ onDone }: { onDone: () => void }) {
             />
           </label>
 
-          {error && <div className="field-note" style={{ color: 'var(--red)' }}>{error}</div>}
+          {error && <div className="field-note" style={{ color: 'var(--pink)' }}>{error}</div>}
 
           <div className="field-note">
             Both come from the machine that set the hub up — run <code>todo sync</code> there.

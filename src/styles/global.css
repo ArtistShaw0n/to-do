@@ -1083,3 +1083,39 @@ body {
   align-items: center;
   gap: var(--s-1);
 }
+
+/* Bugs ───────────────────────────────────────────────────────────────────── */
+
+/* Severity is damage, so it is coloured by damage. It sits where the due date
+   sits, because on a bug that is the thing you scan for. */
+.sev {
+  flex: none;
+  padding: 2px var(--s-2);
+  border-radius: var(--r-pill);
+  font-size: var(--t-caption);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: capitalize;
+  color: var(--text-2);
+  background: var(--glass-strong);
+}
+
+.sev[data-sev='blocker'] { color: #fff; background: var(--pink); }
+.sev[data-sev='major'] { color: var(--orange); background: color-mix(in srgb, var(--orange) 16%, transparent); }
+.sev[data-sev='minor'] { color: var(--text-2); }
+.sev[data-sev='cosmetic'] { color: var(--text-3); }
+
+/* A line the card says about itself: waiting to be checked, unworkable as
+   written, or reopened. These are the states that otherwise stay invisible
+   until someone goes looking, which is how a bug list rots. */
+.card-state {
+  margin-top: var(--s-1);
+  font-size: var(--t-small);
+  font-weight: 600;
+}
+
+.card-state[data-kind='awaiting'] { color: var(--orange); }
+.card-state[data-kind='unworkable'] { color: var(--pink); }
+.card-state[data-kind='reopened'] { color: var(--text-3); }
+
+.bug-panel { margin-top: var(--s-3); }

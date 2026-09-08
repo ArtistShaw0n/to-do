@@ -1,7 +1,7 @@
 {
   "name": "todo",
-  "version": "0.20.2",
-  "description": "Vault \u2014 tasks, notes and passwords, in step across every device",
+  "version": "0.21.0",
+  "description": "Vault — tasks, notes and passwords, in step across every device",
   "private": true,
   "type": "module",
   "bin": {

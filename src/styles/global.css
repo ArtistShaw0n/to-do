@@ -1233,3 +1233,61 @@ body {
 @media (max-width: 520px) {
   .brief-close { width: 26px; height: 26px; }
 }
+
+/* Notes lock ─────────────────────────────────────────────────────────────── */
+
+/* An offer, not a warning: nothing is wrong, there is simply a stronger state
+   available. Tinted with the primary rather than danger for that reason. */
+.protect-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  margin-bottom: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border: 0;
+  border-radius: var(--r-card);
+  font: inherit;
+  font-size: var(--t-small);
+  font-weight: 600;
+  text-align: left;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 26%, transparent);
+  cursor: pointer;
+  transition: background var(--fast);
+}
+
+.protect-row:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+
+/* Already protected and currently open — a state to leave, not to enter. */
+.protect-row[data-unlocked='true'] {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 26%, transparent);
+}
+
+.protect-row[data-unlocked='true']:hover {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+}
+
+.protect-mark { display: grid; place-items: center; }
+
+.lock-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-4);
+  padding-top: var(--s-5);
+}
+
+.lock-mark {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--r-pill);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+}

@@ -19,6 +19,8 @@ import { SyncBadge, SyncSetup, hasSyncConfig } from './components/SyncSetup';
 import { checkReport, isBug, sortBugs } from './lib/bugs';
 import { Brief } from './components/Brief';
 import { briefDismissed, briefFor, dismissBrief } from './lib/digest';
+import { NotesLock } from './components/NotesLock';
+import { encryptValue, hasLock, lockNotes, revealNotes } from './lib/lock';
 import { Settings } from './components/Settings';
 
 type ThemeMode = 'system' | 'light' | 'dark';
@@ -51,6 +53,24 @@ export default function App() {
   // its own because the dismissal records the date, not a flag.
   const [briefRead, setBriefRead] = useState(() => briefDismissed(todayISO()));
   const brief = vault ? briefFor(vault) : null;
+
+  /**
+   * The Notes key, in memory only.
+   *
+   * Never persisted anywhere: closing the window relocks, which is the whole
+   * point — a lock that survives a restart is a lock that is never on.
+   */
+  const [lockKey, setLockKey] = useState<CryptoKey | null>(null);
+  const [askingPin, setAskingPin] = useState(false);
+  /** Notes with their secrets decrypted, for display only — never written back. */
+  const [revealed, setRevealed] = useState<Note[] | null>(null);
+
+  useEffect(() => {
+    if (!vault || !lockKey) { setRevealed(null); return; }
+    let cancelled = false;
+    void revealNotes(vault.notes, lockKey).then((n) => { if (!cancelled) setRevealed(n); });
+    return () => { cancelled = true; };
+  }, [vault, lockKey]);
   const [view, setView] = useState<View>('all');
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -181,7 +201,9 @@ export default function App() {
 
   const items = useMemo<(Task | Note)[]>(() => {
     if (!vault) return [];
-    if (view === 'notes') return sortNotes(searchNotes(vault.notes, query));
+    if (view === 'notes') {
+      return sortNotes(searchNotes(revealed ?? vault.notes, query));
+    }
 
     const live = vault.tasks.filter(isOpen);
     const chosen = (() => {
@@ -199,7 +221,7 @@ export default function App() {
     })();
 
     return searchTasks(chosen, query);
-  }, [vault, view, query]);
+  }, [vault, view, query, revealed]);
 
   if (error && !vault) {
     return (
@@ -221,6 +243,30 @@ export default function App() {
     );
   }
   if (!vault) return <div style={{ height: '100%' }} />;
+
+  const locked = view === 'notes' && hasLock(vault) && !lockKey;
+
+  if (locked || askingPin) {
+    return (
+      <NotesLock
+        config={vault.meta.lock ?? null}
+        count={vault.notes.length}
+        onCancel={() => { setAskingPin(false); if (locked) setView('all'); }}
+        onUnlocked={(key) => { setLockKey(key); setAskingPin(false); }}
+        onCreated={(config, key) => {
+          // Encrypt what is already there in the same write that records the
+          // PIN — a gap between the two is a window with a lock and no key.
+          void (async () => {
+            const sealed = await lockNotes(vault.notes, key);
+            await mutate((v) => ({ ...v, notes: sealed, meta: { ...v.meta, lock: config } }));
+            setLockKey(key);
+            setAskingPin(false);
+          })();
+        }}
+      />
+    );
+  }
+
 
   const themeLabel = theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark';
 
@@ -391,6 +437,32 @@ export default function App() {
           />
         )}
 
+        {view === 'notes' && !hasLock(vault) && vault.notes.length > 0 && (
+          <button className="protect-row" onClick={() => setAskingPin(true)}>
+            <span className="protect-mark" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="7" width="10" height="7" rx="1.8" />
+                <path d="M5.6 7V5.2a2.4 2.4 0 014.8 0V7" />
+              </svg>
+            </span>
+            <span>Protect these with a PIN — nothing is encrypted yet</span>
+          </button>
+        )}
+
+        {view === 'notes' && lockKey && (
+          <button className="protect-row" data-unlocked="true" onClick={() => setLockKey(null)}>
+            <span className="protect-mark" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
+                strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="7" width="10" height="7" rx="1.8" />
+                <path d="M5.6 7V5.2a2.4 2.4 0 014.8 0V7" />
+              </svg>
+            </span>
+            <span>Unlocked — lock again</span>
+          </button>
+        )}
+
         <div className="search-row">
           <span className="search-icon"><SearchGlyph /></span>
           <input
@@ -443,7 +515,14 @@ export default function App() {
                     selected={selected.has(item.id)}
                     onPick={() => toggleSelected(item.id)}
                     onOpen={() => toggleOpen(item.id)}
-                    onPatch={(patch) => void mutate((v) => updateNote(v, item.id, patch))}
+                    onPatch={(patch) => void (async () => {
+                      // Anything typed into a secret is encrypted before it is
+                      // written, so plaintext never reaches the store or the hub.
+                      const sealed = lockKey && patch.secret
+                        ? { ...patch, secret: await encryptValue(patch.secret, lockKey) }
+                        : patch;
+                      await mutate((v) => updateNote(v, item.id, sealed));
+                    })()}
                     onDelete={() => removeIds([item.id])}
                   />
                 ) : (

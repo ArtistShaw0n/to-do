@@ -1,7 +1,7 @@
 {
   "name": "todo",
   "version": "0.22.0",
-  "description": "Vault — tasks, notes and passwords, in step across every device",
+  "description": "Vault \u2014 tasks, notes and passwords, in step across every device",
   "private": true,
   "type": "module",
   "bin": {
@@ -22,7 +22,8 @@
     "build:cli": "vite build --config vite.cli.config.ts",
     "check:generated": "vite build --config vite.cli.config.ts && git diff --exit-code --stat bin/lib/store.mjs",
     "test:bugs": "vite build --config vite.test.config.ts --mode bugs && node .test-out/bugs.mjs",
-    "check:design": "node scripts/check-design-system.mjs"
+    "check:design": "node scripts/check-design-system.mjs",
+    "test:lock": "vite build --config vite.test.config.ts --mode lock && node .test-out/lock.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

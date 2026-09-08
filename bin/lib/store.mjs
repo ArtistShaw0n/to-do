@@ -3009,7 +3009,9 @@ function writeVaultToStore(store, vault) {
       version: vault.version,
       createdAt: vault.meta.createdAt,
       updatedAt: vault.meta.updatedAt,
-      lastSeq: vault.meta.lastSeq
+      lastSeq: vault.meta.lastSeq,
+      // One cell, so the three parts can never arrive apart from each other.
+      lock: vault.meta.lock ? JSON.stringify(vault.meta.lock) : void 0
     }));
   });
   return store;
@@ -3110,7 +3112,17 @@ function storeToVault(store) {
     meta: {
       createdAt: str(values.createdAt) ?? base.meta.createdAt,
       updatedAt: str(values.updatedAt) ?? base.meta.updatedAt,
-      lastSeq: num(values.lastSeq) ?? 0
+      lastSeq: num(values.lastSeq) ?? 0,
+      lock: (() => {
+        const raw = str(values.lock);
+        if (!raw) return void 0;
+        try {
+          const parsed = JSON.parse(raw);
+          return parsed?.salt && parsed?.verifier ? parsed : void 0;
+        } catch {
+          return void 0;
+        }
+      })()
     }
   };
 }
@@ -3156,7 +3168,9 @@ function applyVaultToStore(store, vault) {
       version: vault.version,
       createdAt: vault.meta.createdAt,
       updatedAt: vault.meta.updatedAt,
-      lastSeq: vault.meta.lastSeq
+      lastSeq: vault.meta.lastSeq,
+      // One cell, so the three parts can never arrive apart from each other.
+      lock: vault.meta.lock ? JSON.stringify(vault.meta.lock) : void 0
     }));
   });
 }

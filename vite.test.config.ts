@@ -4,9 +4,9 @@ import { defineConfig } from 'vite';
 export default defineConfig(({ mode }) => ({
   build: {
     lib: {
-      entry: `test/${mode === 'store' || mode === 'bugs' ? mode : 'sync'}.ts`,
+      entry: `test/${['store','bugs','lock'].includes(mode) ? mode : 'sync'}.ts`,
       formats: ['es'],
-      fileName: () => `${mode === 'store' || mode === 'bugs' ? mode : 'sync'}.mjs`,
+      fileName: () => `${['store','bugs','lock'].includes(mode) ? mode : 'sync'}.mjs`,
     },
     outDir: '.test-out',
     emptyOutDir: false,

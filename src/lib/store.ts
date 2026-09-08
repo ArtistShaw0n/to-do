@@ -149,6 +149,8 @@ export function writeVaultToStore(store: MergeableStore, vault: Vault): Mergeabl
       createdAt: vault.meta.createdAt,
       updatedAt: vault.meta.updatedAt,
       lastSeq: vault.meta.lastSeq,
+      // One cell, so the three parts can never arrive apart from each other.
+      lock: vault.meta.lock ? JSON.stringify(vault.meta.lock) : undefined,
     }));
   });
   return store;
@@ -275,6 +277,17 @@ export function storeToVault(store: MergeableStore): Vault {
       createdAt: str(values.createdAt) ?? base.meta.createdAt,
       updatedAt: str(values.updatedAt) ?? base.meta.updatedAt,
       lastSeq: num(values.lastSeq) ?? 0,
+      lock: (() => {
+        const raw = str(values.lock);
+        if (!raw) return undefined;
+        try {
+          const parsed = JSON.parse(raw) as Vault['meta']['lock'];
+          return parsed?.salt && parsed?.verifier ? parsed : undefined;
+        } catch {
+          // A torn lock cell must not lock the app out of its own notes.
+          return undefined;
+        }
+      })(),
     },
   };
 }
@@ -344,6 +357,8 @@ export function applyVaultToStore(store: MergeableStore, vault: Vault): void {
       createdAt: vault.meta.createdAt,
       updatedAt: vault.meta.updatedAt,
       lastSeq: vault.meta.lastSeq,
+      // One cell, so the three parts can never arrive apart from each other.
+      lock: vault.meta.lock ? JSON.stringify(vault.meta.lock) : undefined,
     }));
   });
 }

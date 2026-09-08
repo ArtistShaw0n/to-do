@@ -161,6 +161,12 @@ export interface Vault {
     createdAt: string;
     updatedAt: string;
     lastSeq: number;
+    /**
+     * The Notes PIN, as a salt and a hash of the key it derives — never the
+     * PIN. It rides in the vault so every device recognises the same one; the
+     * key itself is derived on each device and never leaves it.
+     */
+    lock?: { salt: string; verifier: string; iterations: number };
   };
 }
 

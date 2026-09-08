@@ -13,7 +13,7 @@
  */
 
 import {
-  PRIORITY_LABELS, STATUSES, computeStats, ensureProject, findTask,
+  PRIORITY_LABELS, SEVERITIES, STATUSES, computeStats, ensureProject, findTask,
   loadVault, newId, nowISO, parseDate, saveVault, todayISO, vaultPath, writeAppConfig,
   openSession, closeSession, readSyncConfig, writeSyncConfig, clearSyncConfig,
   loadVaultFromFile, pushToSession, sessionVault,
@@ -311,6 +311,18 @@ commands.edit = (positional, flags) => {
   }
 
   task.updatedAt = nowISO();
+  // The bug fields. Without a way to set them the rules can only ever refuse.
+  if (flags.severity) {
+    if (!SEVERITIES.includes(flags.severity)) die(`severity must be one of: ${SEVERITIES.join(', ')}`);
+    task.severity = flags.severity;
+  }
+  if (flags.menu) task.menu = flags.menu;
+  if (flags.steps) task.steps = flags.steps;
+  if (flags.expected) task.expected = flags.expected;
+  if (flags.env) task.environment = flags.env;
+  if (flags.evidence) task.evidenceUrl = flags.evidence;
+  if (flags.reporter) task.reportedBy = flags.reporter;
+
   saveVault(vault);
   process.stdout.write(`${green('✓ updated')}\n${renderTask(task)}\n`);
 };
@@ -411,6 +423,10 @@ commands.list = (positional, flags) => {
 commands.ls = commands.list;
 
 commands.show = (positional) => {
+  // The bug fields, when there are any. Without these the lifecycle happens
+  // but cannot be read back, which is the same as not happening.
+  const bugLine = (label, value) => { if (value) console.log(`${dim(label.padEnd(10))} ${value}`); };
+
   const [needle] = positional;
   if (!needle) die('show needs a task id');
   const vault = loadVault();
@@ -441,6 +457,23 @@ commands.show = (positional) => {
     });
   }
   process.stdout.write(`${out}\n`);
+  bugLine('severity', task.severity);
+  bugLine('menu', task.menu);
+  if (task.steps) {
+    // Steps are usually several lines; indent them under the label rather than
+    // letting the first one sit on the label's row and the rest hang left.
+    console.log(dim('steps'.padEnd(10)));
+    for (const line of task.steps.split('\n')) console.log(`           ${line}`);
+  }
+  bugLine('expected', task.expected);
+  bugLine('env', task.environment);
+  bugLine('evidence', task.evidenceUrl);
+  bugLine('reported', task.reportedBy);
+  bugLine('fixed in', task.fixedIn);
+  bugLine('fixed by', task.fixedBy);
+  bugLine('checked', task.verifiedBy);
+  bugLine('reopened', task.reopenCount ? `${task.reopenCount}×` : undefined);
+
 };
 
 commands.stats = (_positional, flags) => {
@@ -677,6 +710,80 @@ commands.projects = (_positional, flags) => {
 
 commands.path = () => process.stdout.write(`${vaultPath()}\n`);
 
+// ── Bugs ──────────────────────────────────────────────────────────────────────
+
+/**
+ * The bug lifecycle, with the rules enforced rather than remembered.
+ *
+ *   todo → doing → fixed (in a build) → done (checked by someone else)
+ *
+ * Every refusal below exists because skipping it is how a bug list stops being
+ * worth reading. The rules live in src/lib/bugs.ts and are shared with the app;
+ * this is only the way in from a terminal.
+ */
+async function bugRules() {
+  return import('./lib/store.mjs');
+}
+
+commands.bug = async (positional, flags) => {
+  const [action, ...rest] = positional;
+  const { moveBug, checkReport, sortBugs, awaitingCheck, incomplete, isBug } = await bugRules();
+  const vault = loadVault();
+
+  const show = (t) => {
+    const sev = t.severity ? ` ${bold(t.severity)}` : '';
+    const where = [t.project, t.menu].filter(Boolean).join(' › ');
+    const reopened = t.reopenCount ? red(` reopened ×${t.reopenCount}`) : '';
+    console.log(`  ${dim(t.id)} ${t.title}${sev}${reopened}`);
+    if (where) console.log(`         ${dim(where)}`);
+    if (t.status === 'fixed') console.log(`         ${yellow('fixed in ' + (t.fixedIn ?? '?'))} ${dim('· waiting to be checked')}`);
+  };
+
+  if (!action || action === 'list') {
+    const bugs = sortBugs(vault.tasks.filter((t) => isBug(t) && t.status !== 'done' && t.status !== 'cancelled'));
+    if (!bugs.length) return console.log(dim('no open bugs'));
+    console.log(`\n${bold('OPEN BUGS')} ${dim(`(${bugs.length}, worst damage first)`)}\n`);
+    bugs.forEach(show);
+    const waiting = awaitingCheck(vault.tasks);
+    const bad = incomplete(vault.tasks);
+    console.log();
+    if (waiting.length) console.log(yellow(`  ${waiting.length} waiting to be checked`));
+    if (bad.length) console.log(red(`  ${bad.length} cannot be worked on — run \`todo bug check\``));
+    return;
+  }
+
+  if (action === 'check') {
+    const bad = incomplete(vault.tasks);
+    if (!bad.length) return console.log(green('every bug report is workable'));
+    console.log(`\n${bold('REPORTS THAT CANNOT BE ACTED ON')}\n`);
+    for (const t of bad) {
+      console.log(`  ${dim(t.id)} ${t.title}`);
+      for (const c of checkReport(t)) console.log(`         ${red('·')} ${c.message}`);
+    }
+    return;
+  }
+
+  // bug fix <id> --in v2.4.1 --by Rahim
+  // bug verify <id> --by Abdullah
+  // bug reopen <id>
+  const MOVES = { fix: 'fixed', verify: 'done', reopen: 'todo', start: 'doing', wontfix: 'cancelled' };
+  if (!(action in MOVES)) die(`unknown bug command "${action}" — try list, check, fix, verify, reopen, wontfix`);
+
+  const task = findTask(vault, rest.join(' '));
+  const result = moveBug(task, {
+    to: MOVES[action],
+    by: flags.by,
+    fixedIn: flags.in ?? flags.build,
+  });
+
+  if (!result.ok) die(result.reason);
+  vault.tasks = vault.tasks.map((t) => (t.id === task.id ? result.task : t));
+  saveVault(vault);
+  console.log(`${green('OK')} ${task.title} → ${bold(result.task.status)}`);
+  if (result.task.fixedIn) console.log(dim(`   fixed in ${result.task.fixedIn}`));
+  if (result.task.verifiedBy) console.log(dim(`   checked by ${result.task.verifiedBy}`));
+};
+
 /**
  * Point this machine at the sync hub, or report where it is pointed.
  *
@@ -778,6 +885,8 @@ ${bold('Transitions')}
 
 ${bold('Edit')}
   edit <id> [new title] [--title X] [--p N] [--due X|clear] [--project X]
+       bug fields: --severity blocker|major|minor|cosmetic  --menu X
+                   --steps "1. …" --expected X --env X --evidence <url> --reporter X
             [--tag a,b] [--notes X] [--status X] [--repeat X|none]
   tag <id> +work -home
   sub <id> add <title> | done <n> | toggle <n> | rm <n>
@@ -803,6 +912,13 @@ ${bold('Utility')}
   sync [<url> <key>]   connect this machine to the sync hub, or show it
   sync --push          send this machine's file up to the hub (first time only)
   sync --off           go back to the local file only
+
+${bold('Bugs')} ${dim('— the rules are enforced, not remembered')}
+  bug [list]                     open bugs, worst damage first
+  bug check                      reports nobody can act on
+  bug fix <id> --in <build> --by <name>
+  bug verify <id> --by <name>    someone other than the fixer
+  bug reopen <id>                the fix did not hold
   export [--md]        dump everything
 
 ${dim('Dates accept: today, tomorrow, kal, mon..sun, +3d, 2w, 2026-08-20, 20/08')}
@@ -828,7 +944,7 @@ const needsHub = !OFFLINE_COMMANDS.has(command) || (command === 'sync' && flags.
 
 try {
   if (needsHub) await openSession();
-  commands[command](positional, flags);
+  await commands[command](positional, flags);
   await closeSession();
 } catch (err) {
   await closeSession();

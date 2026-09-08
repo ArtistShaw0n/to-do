@@ -17,9 +17,9 @@
 
 import { createMergeableStore, type MergeableStore } from 'tinybase';
 import {
-  emptyVault, NOTE_KINDS, STATUSES,
+  emptyVault, NOTE_KINDS, SEVERITIES, STATUSES,
   type Digest, type Note, type NoteKind, type Priority, type Project,
-  type Status, type Subtask, type Task, type Vault,
+  type Severity, type Status, type Subtask, type Task, type Vault,
 } from './types';
 
 export const TABLES = {
@@ -91,6 +91,17 @@ export function taskToRow(t: Task): Record<string, string | number | boolean> {
     order: t.order,
     source: t.source,
     originalInput: t.originalInput,
+    severity: t.severity,
+    menu: t.menu,
+    steps: t.steps,
+    expected: t.expected,
+    environment: t.environment,
+    evidenceUrl: t.evidenceUrl,
+    reportedBy: t.reportedBy,
+    fixedBy: t.fixedBy,
+    verifiedBy: t.verifiedBy,
+    fixedIn: t.fixedIn,
+    reopenCount: t.reopenCount,
     needsNormalise: t.needsNormalise,
     claimedBy: t.claimedBy,
     claimedAt: t.claimedAt,
@@ -179,6 +190,18 @@ function rowToTask(id: string, row: Record<string, unknown>): Task {
     order: num(row.order) ?? 0,
     source,
     originalInput: str(row.originalInput),
+    severity: SEVERITIES.includes(row.severity as Severity)
+      ? (row.severity as Severity) : undefined,
+    menu: str(row.menu),
+    steps: str(row.steps),
+    expected: str(row.expected),
+    environment: str(row.environment),
+    evidenceUrl: str(row.evidenceUrl),
+    reportedBy: str(row.reportedBy),
+    fixedBy: str(row.fixedBy),
+    verifiedBy: str(row.verifiedBy),
+    fixedIn: str(row.fixedIn),
+    reopenCount: num(row.reopenCount),
     needsNormalise: row.needsNormalise === true ? true : undefined,
     claimedBy: str(row.claimedBy),
     claimedAt: str(row.claimedAt),

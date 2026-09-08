@@ -4,11 +4,25 @@
  * Claude drives). Any change here must land in all three.
  */
 
-export const STATUSES = ['inbox', 'todo', 'doing', 'blocked', 'done', 'cancelled'] as const;
+/**
+ * `fixed` sits between `doing` and `done` on purpose.
+ *
+ * A bug the developer believes is fixed and a bug someone has checked on a real
+ * build are not the same thing, and collapsing them into one "Done" is how a
+ * regression ships. Everything else keeps its old meaning, and `fixed` counts
+ * as open — the work is not finished until it has been verified.
+ */
+export const STATUSES = [
+  'inbox', 'todo', 'doing', 'blocked', 'fixed', 'done', 'cancelled',
+] as const;
 export type Status = (typeof STATUSES)[number];
 
 /** 0 = urgent … 3 = low. Lower sorts first. */
 export type Priority = 0 | 1 | 2 | 3;
+
+/** How much harm the bug does, independent of when it gets fixed. */
+export const SEVERITIES = ['blocker', 'major', 'minor', 'cosmetic'] as const;
+export type Severity = (typeof SEVERITIES)[number];
 
 export interface Subtask {
   id: string;
@@ -45,6 +59,34 @@ export interface Task {
    * unreachable. A Mac picks these up and rewrites them properly.
    */
   needsNormalise?: boolean;
+
+  // ── Bug fields ─────────────────────────────────────────────────────────────
+  // Only meaningful on a task tagged `bug`.
+
+  /**
+   * How much damage it does — not how soon to fix it. That is `priority`, and
+   * they are genuinely different: a typo on the front page is trivial damage
+   * and urgent, a crash in an unused admin screen is severe and can wait.
+   * Merging them into one number is why bug lists stop being sortable.
+   */
+  severity?: Severity;
+  /** The screen it happens on, inside the module. */
+  menu?: string;
+  /** Numbered steps. A bug nobody can reproduce is a bug nobody can fix. */
+  steps?: string;
+  /** What should have happened instead. */
+  expected?: string;
+  /** Browser, device and build it was seen on. */
+  environment?: string;
+  /** Screenshot, recording, or the issue it was filed under. */
+  evidenceUrl?: string;
+  reportedBy?: string;
+  fixedBy?: string;
+  verifiedBy?: string;
+  /** The build the fix went into, so "is it in this one?" has an answer. */
+  fixedIn?: string;
+  /** Reopened more than once means the diagnosis is wrong, not the fix. */
+  reopenCount?: number;
   /** Which device took the job, so two Macs do not both run it. */
   claimedBy?: string;
   claimedAt?: string;
@@ -134,6 +176,7 @@ export const STATUS_LABEL: Record<Status, string> = {
   todo: 'To Do',
   doing: 'In Progress',
   blocked: 'Blocked',
+  fixed: 'Fixed, awaiting check',
   done: 'Done',
   cancelled: 'Cancelled',
 };

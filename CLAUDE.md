@@ -136,6 +136,52 @@ node bin/todo.mjs add "Show a preview popup before download in the OERP email Dr
   --project OERP --tag bug,email,frontend --notes "…" --raw "…"
 ```
 
+### The bug lifecycle
+
+A bug does not go from open to done in one step, and the CLI will not let it:
+
+```
+todo → doing → fixed (in a build) → done (checked by someone else)
+                  ↓                        ↓
+              wontfix                  reopen
+```
+
+```bash
+node bin/todo.mjs bug              # open bugs, worst damage first
+node bin/todo.mjs bug check        # reports nobody can act on
+node bin/todo.mjs bug fix <id> --in v2.4.1 --by Rahim
+node bin/todo.mjs bug verify <id> --by Abdullah
+node bin/todo.mjs bug reopen <id>
+```
+
+What it refuses, and why:
+
+- **A bug cannot jump to done.** "Done" would then mean either "the developer
+  thinks it works" or "someone checked it on a real build", and nobody could
+  tell which. That is how a regression ships.
+- **`fixed` needs the build.** Otherwise "is this fixed in the build I am
+  testing?" has no answer.
+- **The fixer cannot verify their own fix.** Marking your own work as checked
+  is not checking.
+- **Reopening is counted.** Three reopens is a wrong diagnosis, not a fix that
+  keeps failing.
+
+Fill the fields with `edit`:
+
+```bash
+node bin/todo.mjs edit <id> --severity major --menu "Drive" \
+  --steps "1. Open the Drive  2. Click an attachment" \
+  --expected "It previews in place" --reporter Abdullah --evidence <url>
+```
+
+**Severity is not priority.** Severity is how much damage it does; priority is
+how soon to fix it. A typo on the front page is cosmetic and urgent; a crash in
+an unused admin screen is a blocker that can wait. `bug list` sorts by damage
+first, then urgency — one blended number could answer neither question.
+
+The rules live in `src/lib/bugs.ts` and are shared by the app and the CLI.
+`test/bugs.ts` has one test per rule; run `pnpm test:bugs`.
+
 Each module also gets one umbrella task tagged `release` + its module —
 "Fix the reported OERP email module bugs and ship a new release". The app's
 **Bugs** view groups every bug by module and shows that release line underneath

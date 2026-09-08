@@ -2883,7 +2883,16 @@ mapNew$1([
     ]
   ]
 ]);
-const STATUSES = ["inbox", "todo", "doing", "blocked", "done", "cancelled"];
+const STATUSES = [
+  "inbox",
+  "todo",
+  "doing",
+  "blocked",
+  "fixed",
+  "done",
+  "cancelled"
+];
+const SEVERITIES = ["blocker", "major", "minor", "cosmetic"];
 const NOTE_KINDS = ["login", "wifi", "code", "other"];
 function emptyVault() {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -2944,6 +2953,17 @@ function taskToRow(t) {
     order: t.order,
     source: t.source,
     originalInput: t.originalInput,
+    severity: t.severity,
+    menu: t.menu,
+    steps: t.steps,
+    expected: t.expected,
+    environment: t.environment,
+    evidenceUrl: t.evidenceUrl,
+    reportedBy: t.reportedBy,
+    fixedBy: t.fixedBy,
+    verifiedBy: t.verifiedBy,
+    fixedIn: t.fixedIn,
+    reopenCount: t.reopenCount,
     needsNormalise: t.needsNormalise,
     claimedBy: t.claimedBy,
     claimedAt: t.claimedAt
@@ -3019,6 +3039,17 @@ function rowToTask(id2, row) {
     order: num(row.order) ?? 0,
     source,
     originalInput: str(row.originalInput),
+    severity: SEVERITIES.includes(row.severity) ? row.severity : void 0,
+    menu: str(row.menu),
+    steps: str(row.steps),
+    expected: str(row.expected),
+    environment: str(row.environment),
+    evidenceUrl: str(row.evidenceUrl),
+    reportedBy: str(row.reportedBy),
+    fixedBy: str(row.fixedBy),
+    verifiedBy: str(row.verifiedBy),
+    fixedIn: str(row.fixedIn),
+    reopenCount: num(row.reopenCount),
     needsNormalise: row.needsNormalise === true ? true : void 0,
     claimedBy: str(row.claimedBy),
     claimedAt: str(row.claimedAt)
@@ -3129,6 +3160,99 @@ function applyVaultToStore(store, vault) {
     }));
   });
 }
+const isBug = (t) => t.tags.includes("bug");
+function checkReport(t) {
+  const out = [];
+  if (!isBug(t)) return out;
+  if (!t.steps?.trim()) {
+    out.push({ field: "steps", message: "No steps to reproduce — nobody can act on this." });
+  }
+  if (!t.expected?.trim()) {
+    out.push({ field: "expected", message: "Says what happens, not what should happen instead." });
+  }
+  if (!t.severity) {
+    out.push({ field: "severity", message: "No severity, so it cannot be ranked against the others." });
+  }
+  if (!t.project) {
+    out.push({ field: "project", message: "No project." });
+  }
+  return out;
+}
+const ALLOWED = {
+  inbox: ["todo", "doing", "done", "cancelled"],
+  todo: ["doing", "blocked", "fixed", "done", "cancelled"],
+  doing: ["fixed", "blocked", "todo", "done", "cancelled"],
+  blocked: ["todo", "doing", "done", "cancelled"],
+  // The only way out of `fixed` is verified, or back for another go.
+  fixed: ["done", "todo", "doing"],
+  done: ["todo"],
+  cancelled: ["todo"]
+};
+function moveBug(task, move, now = (/* @__PURE__ */ new Date()).toISOString()) {
+  const from = task.status;
+  const { to } = move;
+  if (from === to) return { ok: true, task };
+  if (!ALLOWED[from]?.includes(to)) {
+    return { ok: false, reason: `Cannot go from ${from} to ${to}.` };
+  }
+  if (isBug(task) && to === "done" && from !== "fixed") {
+    return {
+      ok: false,
+      reason: 'A bug goes to "fixed" first, with the build it was fixed in, and is only closed once someone has checked it.'
+    };
+  }
+  const next = { ...task, status: to, updatedAt: now };
+  if (to === "fixed") {
+    const build = move.fixedIn?.trim();
+    if (isBug(task) && !build) {
+      return {
+        ok: false,
+        reason: "Say which build the fix went into, or nobody can tell whether the build they are testing has it."
+      };
+    }
+    next.fixedIn = build;
+    next.fixedBy = move.by?.trim() || task.fixedBy;
+    next.verifiedBy = void 0;
+  }
+  if (to === "done") {
+    const who = move.by?.trim();
+    if (isBug(task)) {
+      if (!who) {
+        return { ok: false, reason: "Say who checked it." };
+      }
+      if (task.fixedBy && who.toLowerCase() === task.fixedBy.toLowerCase()) {
+        return {
+          ok: false,
+          reason: `${who} fixed this, so ${who} cannot be the one who verifies it. Someone else has to look.`
+        };
+      }
+    }
+    next.verifiedBy = who;
+    next.completedAt = now;
+  }
+  if ((from === "fixed" || from === "done") && (to === "todo" || to === "doing")) {
+    next.reopenCount = (task.reopenCount ?? 0) + 1;
+    next.fixedIn = void 0;
+    next.verifiedBy = void 0;
+    next.completedAt = void 0;
+  }
+  return { ok: true, task: next };
+}
+const SEVERITY_RANK = {
+  blocker: 0,
+  major: 1,
+  minor: 2,
+  cosmetic: 3
+};
+function sortBugs(bugs) {
+  return [...bugs].sort((a, b) => {
+    const sa = a.severity ? SEVERITY_RANK[a.severity] : SEVERITIES.length;
+    const sb = b.severity ? SEVERITY_RANK[b.severity] : SEVERITIES.length;
+    return sa - sb || a.priority - b.priority || (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+  });
+}
+const awaitingCheck = (tasks) => tasks.filter((t) => isBug(t) && t.status === "fixed");
+const incomplete = (tasks) => tasks.filter((t) => isBug(t) && checkReport(t).length > 0);
 const getTypeOf = (thing) => typeof thing;
 const TINYBASE = "tinybase";
 const EMPTY_STRING = "";
@@ -5492,8 +5616,14 @@ const createWsSynchronizer = async (store, webSocket, channelIdOrRequestTimeout 
 export {
   TABLES,
   applyVaultToStore,
+  awaitingCheck,
+  checkReport,
   createMergeableStore,
   createWsSynchronizer,
+  incomplete,
+  isBug,
+  moveBug,
+  sortBugs,
   storeToVault,
   writeVaultToStore
 };

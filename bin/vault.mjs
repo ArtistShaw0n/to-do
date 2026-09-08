@@ -21,7 +21,8 @@ const APP_SUPPORT = join(homedir(), 'Library', 'Application Support', 'com.shawo
 
 export const SCHEMA_VERSION = 1;
 
-export const STATUSES = ['inbox', 'todo', 'doing', 'blocked', 'done', 'cancelled'];
+export const STATUSES = ['inbox', 'todo', 'doing', 'blocked', 'fixed', 'done', 'cancelled'];
+export const SEVERITIES = ['blocker', 'major', 'minor', 'cosmetic'];
 export const PRIORITY_LABELS = { 0: 'P0 · Urgent', 1: 'P1 · High', 2: 'P2 · Normal', 3: 'P3 · Low' };
 
 /** Palette used when auto-assigning a colour to a brand new project. */

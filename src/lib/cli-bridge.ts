@@ -12,5 +12,6 @@
  */
 
 export { applyVaultToStore, storeToVault, writeVaultToStore, TABLES } from './store';
+export { checkReport, moveBug, sortBugs, awaitingCheck, incomplete, isBug } from './bugs';
 export { createMergeableStore } from 'tinybase';
 export { createWsSynchronizer } from 'tinybase/synchronizers/synchronizer-ws-client';

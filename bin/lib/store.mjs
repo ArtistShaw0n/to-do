@@ -3175,20 +3175,15 @@ function applyVaultToStore(store, vault) {
   });
 }
 const isBug = (t) => t.tags.includes("bug");
+const isHandedOn = (t) => !!(t.reportedBy?.trim() || t.fixedBy?.trim());
 function checkReport(t) {
   const out = [];
-  if (!isBug(t)) return out;
+  if (!isBug(t) || !isHandedOn(t)) return out;
   if (!t.steps?.trim()) {
-    out.push({ field: "steps", message: "No steps to reproduce — nobody can act on this." });
+    out.push({ field: "steps", message: "Named for someone else, with no steps to reproduce." });
   }
   if (!t.expected?.trim()) {
     out.push({ field: "expected", message: "Says what happens, not what should happen instead." });
-  }
-  if (!t.severity) {
-    out.push({ field: "severity", message: "No severity, so it cannot be ranked against the others." });
-  }
-  if (!t.project) {
-    out.push({ field: "project", message: "No project." });
   }
   return out;
 }

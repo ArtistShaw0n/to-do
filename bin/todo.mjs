@@ -748,14 +748,14 @@ commands.bug = async (positional, flags) => {
     const bad = incomplete(vault.tasks);
     console.log();
     if (waiting.length) console.log(yellow(`  ${waiting.length} waiting to be checked`));
-    if (bad.length) console.log(red(`  ${bad.length} cannot be worked on — run \`todo bug check\``));
+    if (bad.length) console.log(yellow(`  ${bad.length} handed on without the detail — run \`todo bug check\``));
     return;
   }
 
   if (action === 'check') {
     const bad = incomplete(vault.tasks);
-    if (!bad.length) return console.log(green('every bug report is workable'));
-    console.log(`\n${bold('REPORTS THAT CANNOT BE ACTED ON')}\n`);
+    if (!bad.length) return console.log(green('nothing handed to anyone is missing its detail'));
+    console.log(`\n${bold('HANDED ON WITHOUT WHAT THE OTHER PERSON NEEDS')}\n`);
     for (const t of bad) {
       console.log(`  ${dim(t.id)} ${t.title}`);
       for (const c of checkReport(t)) console.log(`         ${red('·')} ${c.message}`);

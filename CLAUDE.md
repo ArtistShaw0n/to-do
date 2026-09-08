@@ -148,7 +148,7 @@ todo → doing → fixed (in a build) → done (checked by someone else)
 
 ```bash
 node bin/todo.mjs bug              # open bugs, worst damage first
-node bin/todo.mjs bug check        # reports nobody can act on
+node bin/todo.mjs bug check        # handed on without the detail (see below)
 node bin/todo.mjs bug fix <id> --in v2.4.1 --by Rahim
 node bin/todo.mjs bug verify <id> --by Abdullah
 node bin/todo.mjs bug reopen <id>
@@ -165,6 +165,14 @@ What it refuses, and why:
   is not checking.
 - **Reopening is counted.** Three reopens is a wrong diagnosis, not a fix that
   keeps failing.
+
+**What it does not demand.** A bug Shawon wrote down for himself needs nothing
+but the line itself — no reproduce steps, no severity. He was there; he knows
+what he saw. `bug check` only speaks up once a bug has a `--reporter` or a
+fixer, because that is the moment the knowledge has to travel to someone who
+was not there. The first version of this rule demanded steps from every bug and
+turned a personal list of twelve into twelve complaints, which is a rule
+inventing work for the person it was meant to serve.
 
 Fill the fields with `edit`:
 
@@ -414,6 +422,10 @@ git push && git push origin v0.18.1
 
 `--no-git-tag-version` is deliberate: plain `pnpm version` commits and tags on
 the spot, before the other two version numbers have been changed.
+
+**pnpm refuses to bump a dirty tree at all** — `--no-git-tag-version` turns off
+the commit, not the cleanliness check. So commit the work first and let the
+version bump be its own commit, or set the three numbers by hand.
 
 **Tag with `-a`.** `git push --follow-tags` pushes *annotated* tags only — it
 skips a plain `git tag v…` without a word of complaint, so the push succeeds,

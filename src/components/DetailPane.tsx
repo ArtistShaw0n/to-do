@@ -432,7 +432,7 @@ function BugPanel({
       <div className="settings-heading">Bug</div>
 
       {complaints.length > 0 && (
-        <div className="field-note" style={{ color: 'var(--orange)' }}>
+        <div className="field-note" style={{ color: 'var(--warning)' }}>
           {complaints.map((c) => c.message).join(' ')}
         </div>
       )}

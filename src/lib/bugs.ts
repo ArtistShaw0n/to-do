@@ -20,26 +20,38 @@ export interface Complaint {
 export const isBug = (t: Task) => t.tags.includes('bug');
 
 /**
- * What a bug must carry before anyone can be asked to fix it.
+ * Is this bug going to be worked on by someone other than the person who wrote
+ * it down?
  *
- * Reproduction steps are the one that matters. A bug nobody can reproduce is a
- * bug nobody can fix, and it will sit on the list forever being re-read.
+ * A named reporter or fixer is the signal. Without one it is a private note —
+ * something Shawon saw and recorded for himself, where the detail lives in his
+ * head and in the team's own sheet.
+ */
+export const isHandedOn = (t: Task) => !!(t.reportedBy?.trim() || t.fixedBy?.trim());
+
+/**
+ * What a bug must carry before someone ELSE can be asked to fix it.
+ *
+ * The demand is deliberately narrow. Reproduction steps matter enormously when
+ * knowledge has to travel between two people — a bug nobody else can reproduce
+ * is a bug nobody else can fix, and it sits on the list being re-read. They
+ * matter not at all on a line you wrote to remind yourself of something you
+ * already understand.
+ *
+ * The first version demanded them from every bug, which turned a personal list
+ * of twelve into twelve complaints. That was a rule invented here being
+ * enforced against its own user; the detail already lived in the team's sheet
+ * and Vault's job was to remember the bug existed, not to duplicate it.
  */
 export function checkReport(t: Task): Complaint[] {
   const out: Complaint[] = [];
-  if (!isBug(t)) return out;
+  if (!isBug(t) || !isHandedOn(t)) return out;
 
   if (!t.steps?.trim()) {
-    out.push({ field: 'steps', message: 'No steps to reproduce — nobody can act on this.' });
+    out.push({ field: 'steps', message: 'Named for someone else, with no steps to reproduce.' });
   }
   if (!t.expected?.trim()) {
     out.push({ field: 'expected', message: 'Says what happens, not what should happen instead.' });
-  }
-  if (!t.severity) {
-    out.push({ field: 'severity', message: 'No severity, so it cannot be ranked against the others.' });
-  }
-  if (!t.project) {
-    out.push({ field: 'project', message: 'No project.' });
   }
   return out;
 }
@@ -188,6 +200,6 @@ export function sortBugs(bugs: Task[]): Task[] {
 export const awaitingCheck = (tasks: Task[]) =>
   tasks.filter((t) => isBug(t) && t.status === 'fixed');
 
-/** Reported but never given steps or a severity, so unworkable as they stand. */
+/** Handed to someone else without the detail they would need. */
 export const incomplete = (tasks: Task[]) =>
   tasks.filter((t) => isBug(t) && checkReport(t).length > 0);

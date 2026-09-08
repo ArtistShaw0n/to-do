@@ -633,7 +633,7 @@ function TaskCard({
   // A fixed bug is not a finished one — it is waiting for somebody to check it,
   // and that queue is the one that silently goes stale.
   const awaiting = bug && task.status === 'fixed';
-  // A report with no steps cannot be acted on, however long it sits there.
+  // Named for someone else and missing what they would need to reproduce it.
   const unworkable = bug && !done && checkReport(task).length > 0;
   // While anything is selected, a tap picks rather than opens.
   const press = useLongPress(onPick, selecting ? onPick : onOpen);
@@ -669,7 +669,7 @@ function TaskCard({
           )}
           {unworkable && (
             <div className="card-state" data-kind="unworkable">
-              Cannot be worked on: {checkReport(task)[0].message}
+              {checkReport(task)[0].message}
             </div>
           )}
           {task.reopenCount ? (

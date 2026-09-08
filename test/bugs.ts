@@ -89,16 +89,24 @@ const twice = moveBug(
   { to: 'todo' });
 check('the count keeps climbing across rounds', twice.task?.reopenCount === 2);
 
-// ── A report that cannot be acted on ─────────────────────────────────────────
+// ── A report only has to be complete once it leaves your hands ───────────────
 
-check('no steps is a complaint',
-  checkReport(bug({ steps: undefined })).some((c) => c.field === 'steps'));
-check('no expected result is a complaint',
-  checkReport(bug({ expected: undefined })).some((c) => c.field === 'expected'));
-check('no severity is a complaint',
-  checkReport(bug({ severity: undefined })).some((c) => c.field === 'severity'));
-check('a complete report has no complaints', checkReport(bug()).length === 0);
-check('a plain task is never complained about', checkReport(bug({ tags: [] })).length === 0);
+check('a bug you kept to yourself is never complained about',
+  checkReport(bug({ steps: undefined, expected: undefined, severity: undefined })).length === 0);
+
+check('handing it to someone with no steps is a complaint',
+  checkReport(bug({ reportedBy: 'Abdullah', steps: undefined })).some((c) => c.field === 'steps'));
+check('handing it on with no expected result is a complaint',
+  checkReport(bug({ reportedBy: 'Abdullah', expected: undefined })).some((c) => c.field === 'expected'));
+check('someone else having fixed it counts as handed on too',
+  checkReport(bug({ fixedBy: 'Rahim', steps: undefined })).some((c) => c.field === 'steps'));
+
+check('severity ranks the list, it is not demanded',
+  checkReport(bug({ reportedBy: 'Abdullah', severity: undefined })).length === 0);
+check('a complete handed-on report has no complaints',
+  checkReport(bug({ reportedBy: 'Abdullah' })).length === 0);
+check('a plain task is never complained about',
+  checkReport(bug({ tags: [], reportedBy: 'Abdullah', steps: undefined })).length === 0);
 
 // ── Severity and priority stay separate ──────────────────────────────────────
 
@@ -121,10 +129,12 @@ const pool = [
   bug({ status: 'fixed', fixedIn: 'v1' }),
   bug({ status: 'doing' }),
   bug({ status: 'fixed', fixedIn: 'v1' }),
-  bug({ steps: undefined }),
+  bug({ steps: undefined }),                          // his own line — his business
+  bug({ reportedBy: 'Abdullah', steps: undefined }),  // someone else's to fix
 ];
 check('awaiting-check finds only the fixed ones', awaitingCheck(pool).length === 2);
-check('incomplete finds the unworkable report', incomplete(pool).length === 1);
+check('incomplete passes over a personal note and finds the handed-on one',
+  incomplete(pool).length === 1);
 
 // ── Moves that make no sense are refused ─────────────────────────────────────
 

@@ -312,6 +312,7 @@ export default function App() {
             <p className="sheet-date">{longDate()}</p>
           </div>
 
+          <div className="head-actions">
           <button
             className="theme-btn"
             title="Settings"
@@ -348,6 +349,8 @@ export default function App() {
               </svg>
             )}
           </button>
+          </div>
+
         </header>
 
         <div className="tile-row">

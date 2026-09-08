@@ -1034,5 +1034,13 @@ body {
   color: var(--text-1);
 }
 
-/* Two buttons in the header now, so they need room between them. */
-.sheet-head { gap: 8px; }
+/* The header is `space-between`, which spreads its children to the edges. That
+   is right for two — a title and a control — and wrong the moment a third
+   appears: they space out evenly and the new one lands in the middle. The
+   controls are one group, so the row still has two children. */
+.head-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}

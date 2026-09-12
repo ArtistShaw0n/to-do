@@ -174,7 +174,7 @@ was not there. The first version of this rule demanded steps from every bug and
 turned a personal list of twelve into twelve complaints, which is a rule
 inventing work for the person it was meant to serve.
 
-Fill the fields with `edit`:
+Fill the fields at `add` time or later with `edit` — both take the same flags:
 
 ```bash
 node bin/todo.mjs edit <id> --severity major --menu "Drive" \
@@ -190,14 +190,19 @@ first, then urgency — one blended number could answer neither question.
 The rules live in `src/lib/bugs.ts` and are shared by the app and the CLI.
 `test/bugs.ts` has one test per rule; run `pnpm test:bugs`.
 
-Each module also gets one umbrella task tagged `release` + its module —
-"Fix the reported OERP email module bugs and ship a new release", so it is clear
-what the fixes are going into.
+Two lists carry headings, both from `src/lib/vault.ts` and both returning the
+same `TaskGroup` shape so they cannot drift: **Bugs** by module
+(`groupByModule`), **Done** by category — Bugs, Personal, then each project
+(`groupByCategory`). Heaviest group first in both, and whatever has no home
+last. Every other view stays flat, because a tile already answered the question
+there.
 
-`groupBugsByModule` in `src/lib/vault.ts` arranges the Bugs view that way, but
-**nothing calls it yet** — the Bugs view is still one flat list, worst damage
-first. Only **Done** carries headings (`groupByCategory`, same file), because it
-is the one list no tile chose for you.
+Each module also gets one umbrella task tagged `release` + its module —
+"Fix the reported OERP email module bugs and ship a new release". The app's
+**Bugs** view groups every bug under its module and prints that release line
+beneath the heading, so it is clear what the fixes are going into. A bug with
+no module tag lands under **Unfiled**, which is the visible cost of forgetting
+one.
 
 Reproduce steps and screenshots belong in the GitLab issue, next to the fix
 commit; put the issue link in `--notes`. The task here is the one line saying
@@ -309,6 +314,8 @@ sync --off                    go back to the local file only
 add <title>       --p 0-3  --due X  --tag a,b  --project X  --notes X
                   --sub "a,b"  --repeat daily|weekdays|weekly|biweekly|monthly
                   --raw "<his original words>"   --est <minutes>
+                  --severity X --menu X --steps X --expected X
+                  --env X --evidence X --reporter X      # same as `edit`
 
 start|stop|done|reopen|cancel|unblock <id...>
 block <id> "reason"

@@ -64,6 +64,31 @@ function parseArgs(argv) {
 
 const csv = (v) => (typeof v === 'string' ? v.split(',').map((s) => s.trim()).filter(Boolean) : []);
 
+/** A flag's value, or undefined when it was passed bare (`--menu` with nothing). */
+const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+
+/**
+ * The bug fields, set the same way whether the task is being filed or edited.
+ *
+ * `add` used to ignore every one of them. A `--severity major` on the line
+ * that files the bug went nowhere and said nothing about it, so the bug
+ * arrived unranked and the loss was invisible until someone wondered why the
+ * list was in the wrong order.
+ */
+function applyBugFlags(task, flags) {
+  const severity = text(flags.severity);
+  if (severity) {
+    if (!SEVERITIES.includes(severity)) die(`severity must be one of: ${SEVERITIES.join(', ')}`);
+    task.severity = severity;
+  }
+  if (text(flags.menu)) task.menu = text(flags.menu);
+  if (text(flags.steps)) task.steps = text(flags.steps);
+  if (text(flags.expected)) task.expected = text(flags.expected);
+  if (text(flags.env)) task.environment = text(flags.env);
+  if (text(flags.evidence)) task.evidenceUrl = text(flags.evidence);
+  if (text(flags.reporter)) task.reportedBy = text(flags.reporter);
+}
+
 function parsePriority(v) {
   if (v === undefined || v === true) return undefined;
   const n = Number(String(v).replace(/^p/i, ''));
@@ -167,6 +192,8 @@ commands.add = (positional, flags) => {
     // Keeps the user's original Banglish phrasing next to the normalised title.
     originalInput: flags.raw && flags.raw !== true ? String(flags.raw) : undefined,
   };
+
+  applyBugFlags(task, flags);
 
   vault.tasks.push(task);
   saveVault(vault);
@@ -311,17 +338,7 @@ commands.edit = (positional, flags) => {
   }
 
   task.updatedAt = nowISO();
-  // The bug fields. Without a way to set them the rules can only ever refuse.
-  if (flags.severity) {
-    if (!SEVERITIES.includes(flags.severity)) die(`severity must be one of: ${SEVERITIES.join(', ')}`);
-    task.severity = flags.severity;
-  }
-  if (flags.menu) task.menu = flags.menu;
-  if (flags.steps) task.steps = flags.steps;
-  if (flags.expected) task.expected = flags.expected;
-  if (flags.env) task.environment = flags.env;
-  if (flags.evidence) task.evidenceUrl = flags.evidence;
-  if (flags.reporter) task.reportedBy = flags.reporter;
+  applyBugFlags(task, flags);
 
   saveVault(vault);
   process.stdout.write(`${green('✓ updated')}\n${renderTask(task)}\n`);

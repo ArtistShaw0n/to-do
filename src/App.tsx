@@ -2,9 +2,9 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { NOTE_KIND_META, type Note, type Task } from './lib/types';
 import { isOverdue, longDate, relativeDue, todayISO } from './lib/dates';
 import {
-  PERSONAL, addNote, addTask, deleteNote, deleteTask, groupByCategory, isOpen, newId,
-  projectColor, searchNotes, searchTasks, sortNotes, sortTasks, toggleDone, updateNote,
-  updateTask,
+  PERSONAL, addNote, addTask, deleteNote, deleteTask, groupByCategory, groupByModule,
+  isOpen, newId, projectColor, searchNotes, searchTasks, sortNotes, sortTasks, toggleDone,
+  updateNote, updateTask,
 } from './lib/vault';
 import {
   applyItems, buildPrompt, looksLikeSecret, noteFields, noteLocally, normaliseLocally,
@@ -224,16 +224,30 @@ export default function App() {
   }, [vault, view, query, revealed]);
 
   /**
-   * Done is the one list nothing chose for you, so it carries its own headings.
-   * Everywhere else a tile already answered the question and a second set of
-   * labels would only repeat it.
+   * Two lists carry headings, for the same reason and by different axes.
+   *
+   * **Done** because nothing chose it — it is everything that ever finished, so
+   * it splits the way the tiles split the vault. **Bugs** by module, because a
+   * fix ships inside a module's release: twelve bugs across four modules is
+   * four releases, and a flat list hides that.
+   *
+   * All and Personal stay flat. A tile already answered the question there, and
+   * a second set of labels would only repeat it.
    */
   const groups = useMemo(() => {
-    if (view !== 'done') return [{ key: 'flat', label: '', items }];
-    // Only the notes view holds notes, and it is never this one.
-    return groupByCategory(items as Task[])
-      .map((g) => ({ key: g.key, label: g.label, items: g.tasks as (Task | Note)[] }));
-  }, [items, view]);
+    const flat = [{ key: 'flat', label: '', items, release: undefined as Task | undefined }];
+    if (!vault || (view !== 'done' && view !== 'bugs')) return flat;
+
+    // Only the notes view holds notes, and neither of these is it.
+    const tasks = items as Task[];
+    const found = view === 'done' ? groupByCategory(tasks) : groupByModule(vault, tasks);
+    return found.map((g) => ({
+      key: g.key,
+      label: g.label,
+      items: g.tasks as (Task | Note)[],
+      release: g.release,
+    }));
+  }, [items, view, vault]);
 
   if (error && !vault) {
     return (
@@ -521,8 +535,13 @@ export default function App() {
                 <Fragment key={group.key}>
                   {group.label && (
                     <div className="stack-heading">
-                      {group.label}
-                      <span className="stack-count">{group.items.length}</span>
+                      <div className="stack-heading-row">
+                        <span>{group.label}</span>
+                        <span className="stack-count">{group.items.length}</span>
+                      </div>
+                      {group.release && (
+                        <div className="stack-note">{group.release.title}</div>
+                      )}
                     </div>
                   )}
                   {group.items.map((item) => ('kind' in item ? (

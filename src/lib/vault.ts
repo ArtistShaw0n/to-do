@@ -8,6 +8,7 @@
 
 import { emptyVault, NOTE_KINDS, PROJECT_COLORS, type Note, type NoteKind, type Priority, type Stats, type Status, type Task, type Vault } from './types';
 import { todayISO } from './dates';
+import { sortBugs } from './bugs';
 
 const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 const DEV_KEY = 'todo.dev.vault';
@@ -373,38 +374,37 @@ export function moduleOf(task: Task): string | undefined {
   return task.tags.find((t) => !KIND_TAGS.has(t.toLowerCase()));
 }
 
-export interface BugGroup {
-  module: string;
-  /** The umbrella "ship a release" task for this module, when one exists. */
-  release?: Task;
-  bugs: Task[];
-}
-
 /**
- * Bugs grouped by the module they were found in, heaviest group first, with
- * each module's release task attached so it is clear what the fixes are
- * heading into.
+ * Bugs under the module they were found in, each with the release its fixes
+ * are heading into.
+ *
+ * The module is the heading because that is what a fix ships inside: twelve
+ * bugs across four modules is four releases, not one job. Worst damage first
+ * within each, which is the order someone actually works a module through.
+ *
+ * Takes the list rather than reading the vault, so a search narrows the groups
+ * instead of being ignored by them.
  */
-export function groupBugsByModule(vault: Vault, done = false): BugGroup[] {
+export function groupByModule(vault: Vault, bugs: Task[]): TaskGroup[] {
   const releases = vault.tasks.filter((t) => t.tags.includes('release'));
-  const bugs = vault.tasks.filter(
-    (t) => t.tags.includes('bug') && (done ? !isOpen(t) : isOpen(t)),
-  );
+  const buckets = new Map<string, Task[]>();
 
-  const byModule = new Map<string, Task[]>();
   for (const bug of bugs) {
     const key = moduleOf(bug) ?? 'unfiled';
-    if (!byModule.has(key)) byModule.set(key, []);
-    byModule.get(key)!.push(bug);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key)!.push(bug);
   }
 
-  return [...byModule]
+  return [...buckets]
     .map(([module, list]) => ({
-      module,
+      key: module === 'unfiled' ? 'unfiled' : `module:${module}`,
+      // `project-hub` is a tag, not a heading. The hyphen is how it was typed,
+      // not how it is read.
+      label: module === 'unfiled' ? 'Unfiled' : module.replace(/-/g, ' '),
+      tasks: sortBugs(list),
       release: releases.find((r) => moduleOf(r) === module),
-      bugs: sortTasks(list),
     }))
-    .sort((a, b) => b.bugs.length - a.bugs.length || a.module.localeCompare(b.module));
+    .sort(byWeight);
 }
 
 /** The project a task falls into when it is nobody's work but his own. */
@@ -415,7 +415,19 @@ export interface TaskGroup {
   key: string;
   label: string;
   tasks: Task[];
+  /** The umbrella release these are heading into, where one exists. */
+  release?: Task;
 }
+
+/**
+ * The order groups are read in, written once so the two groupings cannot
+ * drift: the heaviest first, and whatever has no home last however big it
+ * grows, because leftovers are not a category.
+ */
+const byWeight = (a: TaskGroup, b: TaskGroup) =>
+  Number(a.key === 'unfiled') - Number(b.key === 'unfiled')
+  || b.tasks.length - a.tasks.length
+  || a.label.localeCompare(b.label);
 
 /**
  * Split a list the way the tiles above it split the vault.
@@ -445,12 +457,7 @@ export function groupByCategory(tasks: Task[]): TaskGroup[] {
     else put('unfiled', 'Unfiled', t);
   }
 
-  // Heaviest group first, the same order the bug groups use. Whatever has no
-  // home goes last however big it grows, because it is the leftovers.
-  return [...buckets.values()].sort((a, b) =>
-    Number(a.key === 'unfiled') - Number(b.key === 'unfiled')
-    || b.tasks.length - a.tasks.length
-    || a.label.localeCompare(b.label));
+  return [...buckets.values()].sort(byWeight);
 }
 
 export function projectColor(vault: Vault, name?: string): string {

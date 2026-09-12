@@ -401,6 +401,36 @@ body {
   gap: var(--s-2);
 }
 
+/* A heading inside a card stack.
+
+   Every other list was chosen by a tile, so it already knows what it is —
+   these are the bugs, this is personal. Done is the one list nothing chose:
+   it holds everything that ever finished at once, and without headings a
+   closed bug reads as another finished errand. So the labels do here what the
+   tile does elsewhere.
+
+   The margin is the group step on top of the stack's own 8px, which keeps the
+   distance between two groups larger than the distance inside one. */
+.stack-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+  font-size: var(--t-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.stack-heading:first-child { margin-top: 0; }
+
+/* Lighter than the label so the two are read in order, not as one word. */
+.stack-count {
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
 .card {
   position: relative;
   border-radius: var(--r-card);

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { NOTE_KIND_META, type Note, type Task } from './lib/types';
 import { isOverdue, longDate, relativeDue, todayISO } from './lib/dates';
 import {
-  addNote, addTask, deleteNote, deleteTask, isOpen, newId, projectColor,
-  searchNotes, searchTasks, sortNotes, sortTasks, toggleDone, updateNote, updateTask,
+  PERSONAL, addNote, addTask, deleteNote, deleteTask, groupByCategory, isOpen, newId,
+  projectColor, searchNotes, searchTasks, sortNotes, sortTasks, toggleDone, updateNote,
+  updateTask,
 } from './lib/vault';
 import {
   applyItems, buildPrompt, looksLikeSecret, noteFields, noteLocally, normaliseLocally,
@@ -29,7 +30,6 @@ const THEME_ORDER: ThemeMode[] = ['system', 'light', 'dark'];
 type View = 'all' | 'personal' | 'bugs' | 'notes' | 'done';
 
 /** The project the Personal category filters to. */
-const PERSONAL = 'Personal';
 
 const CATEGORIES: { view: View; label: string; glyph: ViewGlyphName; color: string }[] = [
   { view: 'all', label: 'All', glyph: 'all', color: 'var(--blue)' },
@@ -222,6 +222,18 @@ export default function App() {
 
     return searchTasks(chosen, query);
   }, [vault, view, query, revealed]);
+
+  /**
+   * Done is the one list nothing chose for you, so it carries its own headings.
+   * Everywhere else a tile already answered the question and a second set of
+   * labels would only repeat it.
+   */
+  const groups = useMemo(() => {
+    if (view !== 'done') return [{ key: 'flat', label: '', items }];
+    // Only the notes view holds notes, and it is never this one.
+    return groupByCategory(items as Task[])
+      .map((g) => ({ key: g.key, label: g.label, items: g.tasks as (Task | Note)[] }));
+  }, [items, view]);
 
   if (error && !vault) {
     return (
@@ -505,43 +517,51 @@ export default function App() {
             </div>
           ) : (
             <div className="card-stack">
-              {items.map((item) =>
-                'kind' in item ? (
-                  <NoteCard
-                    key={item.id}
-                    note={item}
-                    open={openId === item.id}
-                    selecting={selecting}
-                    selected={selected.has(item.id)}
-                    onPick={() => toggleSelected(item.id)}
-                    onOpen={() => toggleOpen(item.id)}
-                    onPatch={(patch) => void (async () => {
-                      // Anything typed into a secret is encrypted before it is
-                      // written, so plaintext never reaches the store or the hub.
-                      const sealed = lockKey && patch.secret
-                        ? { ...patch, secret: await encryptValue(patch.secret, lockKey) }
-                        : patch;
-                      await mutate((v) => updateNote(v, item.id, sealed));
-                    })()}
-                    onDelete={() => removeIds([item.id])}
-                  />
-                ) : (
-                  <TaskCard
-                    key={item.id}
-                    task={item}
-                    vault={vault}
-                    busy={busy.has(item.id)}
-                    open={openId === item.id}
-                    selecting={selecting}
-                    selected={selected.has(item.id)}
-                    onPick={() => toggleSelected(item.id)}
-                    onOpen={() => toggleOpen(item.id)}
-                    onToggle={() => void mutate((v) => toggleDone(v, item.id))}
-                    onPatch={(patch) => void mutate((v) => updateTask(v, item.id, patch))}
-                    onDelete={() => removeIds([item.id])}
-                  />
-                ),
-              )}
+              {groups.map((group) => (
+                <Fragment key={group.key}>
+                  {group.label && (
+                    <div className="stack-heading">
+                      {group.label}
+                      <span className="stack-count">{group.items.length}</span>
+                    </div>
+                  )}
+                  {group.items.map((item) => ('kind' in item ? (
+                    <NoteCard
+                      key={item.id}
+                      note={item}
+                      open={openId === item.id}
+                      selecting={selecting}
+                      selected={selected.has(item.id)}
+                      onPick={() => toggleSelected(item.id)}
+                      onOpen={() => toggleOpen(item.id)}
+                      onPatch={(patch) => void (async () => {
+                        // Anything typed into a secret is encrypted before it is
+                        // written, so plaintext never reaches the store or the hub.
+                        const sealed = lockKey && patch.secret
+                          ? { ...patch, secret: await encryptValue(patch.secret, lockKey) }
+                          : patch;
+                        await mutate((v) => updateNote(v, item.id, sealed));
+                      })()}
+                      onDelete={() => removeIds([item.id])}
+                    />
+                  ) : (
+                    <TaskCard
+                      key={item.id}
+                      task={item}
+                      vault={vault}
+                      busy={busy.has(item.id)}
+                      open={openId === item.id}
+                      selecting={selecting}
+                      selected={selected.has(item.id)}
+                      onPick={() => toggleSelected(item.id)}
+                      onOpen={() => toggleOpen(item.id)}
+                      onToggle={() => void mutate((v) => toggleDone(v, item.id))}
+                      onPatch={(patch) => void mutate((v) => updateTask(v, item.id, patch))}
+                      onDelete={() => removeIds([item.id])}
+                    />
+                  )))}
+                </Fragment>
+              ))}
             </div>
           )}
         </div>

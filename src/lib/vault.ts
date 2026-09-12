@@ -407,6 +407,52 @@ export function groupBugsByModule(vault: Vault, done = false): BugGroup[] {
     .sort((a, b) => b.bugs.length - a.bugs.length || a.module.localeCompare(b.module));
 }
 
+/** The project a task falls into when it is nobody's work but his own. */
+export const PERSONAL = 'Personal';
+
+/** A labelled run of tasks inside one list. */
+export interface TaskGroup {
+  key: string;
+  label: string;
+  tasks: Task[];
+}
+
+/**
+ * Split a list the way the tiles above it split the vault.
+ *
+ * Every live view answers one question because a tile chose it — these are the
+ * bugs, this is personal. Done answers none of them: it is everything that ever
+ * finished, so a closed bug sits between a grocery item and an OERP release
+ * with nothing saying which is which. The headings are what the tile was doing
+ * for the other views.
+ *
+ * One bucket per task, first match winning. A closed bug belongs under Bugs
+ * whatever project it came from, because being a bug is what it was worked on
+ * as — filing it under OERP instead would hide it among the features.
+ */
+export function groupByCategory(tasks: Task[]): TaskGroup[] {
+  const buckets = new Map<string, TaskGroup>();
+
+  const put = (key: string, label: string, task: Task) => {
+    if (!buckets.has(key)) buckets.set(key, { key, label, tasks: [] });
+    buckets.get(key)!.tasks.push(task);
+  };
+
+  for (const t of tasks) {
+    if (t.tags.includes('bug')) put('bugs', 'Bugs', t);
+    else if (t.project === PERSONAL) put('personal', PERSONAL, t);
+    else if (t.project) put(`project:${t.project}`, t.project, t);
+    else put('unfiled', 'Unfiled', t);
+  }
+
+  // Heaviest group first, the same order the bug groups use. Whatever has no
+  // home goes last however big it grows, because it is the leftovers.
+  return [...buckets.values()].sort((a, b) =>
+    Number(a.key === 'unfiled') - Number(b.key === 'unfiled')
+    || b.tasks.length - a.tasks.length
+    || a.label.localeCompare(b.label));
+}
+
 export function projectColor(vault: Vault, name?: string): string {
   if (!name) return 'var(--tint)';
   return vault.projects.find((p) => p.name === name)?.color ?? 'var(--tint)';

@@ -191,9 +191,13 @@ The rules live in `src/lib/bugs.ts` and are shared by the app and the CLI.
 `test/bugs.ts` has one test per rule; run `pnpm test:bugs`.
 
 Each module also gets one umbrella task tagged `release` + its module —
-"Fix the reported OERP email module bugs and ship a new release". The app's
-**Bugs** view groups every bug by module and shows that release line underneath
-the heading, so it is clear what the fixes are going into.
+"Fix the reported OERP email module bugs and ship a new release", so it is clear
+what the fixes are going into.
+
+`groupBugsByModule` in `src/lib/vault.ts` arranges the Bugs view that way, but
+**nothing calls it yet** — the Bugs view is still one flat list, worst damage
+first. Only **Done** carries headings (`groupByCategory`, same file), because it
+is the one list no tile chose for you.
 
 Reproduce steps and screenshots belong in the GitLab issue, next to the fix
 commit; put the issue link in `--notes`. The task here is the one line saying

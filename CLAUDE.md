@@ -218,21 +218,26 @@ normalised on the spot, in two passes:
    the entry appears immediately in Shawon's own wording. `looksLikeSecret`
    diverts a line that merely states a passcode (`tab er pass 5665`) into a Note
    instead, so a secret never sits in a task title even briefly.
-2. The app then shells out to `claude -p` (the `normalise_task` command in
-   `src-tauri/src/lib.rs`) with a condensed copy of the rules on this page, and
-   `applyItems` folds the reply back in.
+2. The app then asks Claude, in this order: **the hub's API** (any device, no Mac
+   needed — see *Claude in the hub* in §5), then `claude -p` on a Mac (the
+   `normalise_task` command in `src-tauri/src/lib.rs`). `applyItems` folds the
+   reply back in. A line that turned out to be a note is never sent to the hub.
 
 The reply is a **list**, because one typed line is not always one entry. It can
 be two tasks — "invoice pathate hobe ar PR review korte hobe" — or a note rather
 than a task. `applyItems` reuses the placeholder when the first item is the same
 kind of thing and drops it otherwise, all in a single write.
 
-If the CLI is missing, logged out or slow, pass 1 stands and nothing is lost.
+If neither can answer, pass 1 stands and nothing is lost. A task typed where
+Claude cannot be reached is flagged `needsNormalise`, and **any** device that can
+reach the hub's API — the Mac, or just another phone with the app open — picks it
+up later, claiming it first so two devices do not both pay for it.
 
 **`normalise.ts` is a fourth implementation of the rules in this section.** Add
 a time word, a priority word or a module here and it has to go in that file's
-tables and in `buildPrompt` too, or the app and the CLI will disagree about the
-same sentence.
+tables and in `src/lib/prompts.ts` too — that file holds the rules text that both
+`claude -p` and the hub's API are given — or the app and the CLI will disagree
+about the same sentence.
 
 ### Judgement calls
 
@@ -296,12 +301,23 @@ alone — no Claude, no network. Optionally scheduled for 06:30 daily via
 `bash scripts/install-daily-digest.sh`.
 
 So the app always has *something*. Your job is to make it better: when Shawon
-starts a session, check whether today's digest was machine-written and replace
-it with a real one.
+starts a session, check who wrote today's digest.
 
 ```bash
-node bin/todo.mjs digest --json | grep '"author"'   # "auto" means write a proper one
+node bin/todo.mjs digest --json | grep '"author"'
 ```
+
+| `author` | Who | What to do |
+|---|---|---|
+| `auto` | the machine floor | write a proper one |
+| `api` | the hub, at 06:30 (or when the app asked) | leave it unless it is stale or he asks; yours is allowed to replace it |
+| `claude` | a session (you) | it stands |
+
+Without any session at all there is still a good brief: the hub's cron trigger
+(`[triggers]` in `wrangler.toml`, 06:30 Dhaka) writes one into the store itself,
+from the tasks only, and it reaches every device by sync. It never overwrites an
+`api` or `claude` brief — only the `auto` floor — unless the app's refresh button
+asked for it.
 
 ---
 
@@ -366,6 +382,70 @@ Claude Code ──▶ bin/todo.mjs ──▶ data/tasks.json ◀── Rust fs-w
 - The app suppresses the file event for its *own* writes by matching
   `meta.updatedAt`, so saving doesn't cause a reload loop.
 
+### Claude in the hub
+
+The hub (`worker/`) holds an Anthropic API key and calls Claude for every
+device — which is how a phone gets the same normalising a Mac does, with no Mac
+awake. The key is a Worker secret, set once in a terminal and never committed,
+never in `.dev.vars` for production, and never pasted into chat:
+
+```bash
+npx wrangler secret put ANTHROPIC_API_KEY
+```
+
+Without it the hub syncs exactly as before and every AI feature switches itself
+off: `GET /ai/status` says `configured: false` and the app hides the buttons.
+
+| Door | What it does |
+|---|---|
+| `POST /ai/normalise` | a typed line → tasks (and notes), as the same JSON `claude -p` returns, so `parseItems` reads both |
+| `POST /ai/steps` | propose subtasks; shown for review, never written unreviewed |
+| `POST /ai/image` | a screenshot → tasks, **tasks only**; shown for review before anything is added |
+| `POST /ai/ask` | a question about the list, answered in his register |
+| `POST /ai/brief` | write today's brief now (the 06:30 cron does the same) |
+| `GET /ai/status` | configured? which model, today's calls against the ceiling |
+
+Auth is the sync key as `Authorization: Bearer …` (a `fetch` can set a header; a
+browser WebSocket cannot). The rules that are not negotiable:
+
+- **Notes never reach the API.** The doors take tasks; `describeTasks` in
+  `worker/prompts.ts` names the only fields it reads and drops the rest, so a
+  client sending a whole task cannot make its notes, original wording or
+  evidence links travel. The one exception is older and not part of this: a
+  secret-looking line typed on a Mac still goes to `claude -p`, as it always did.
+- **Purposes, not a pipe.** There is no "send this prompt" route. The prompts
+  live on the hub, so a leaked sync key buys four narrow doors and a ceiling,
+  not the credit.
+- **A ceiling.** `AI_DAILY_CAP` (150 calls a day, across every feature) is spent
+  *before* the call, in the Durable Object, which handles one thing at a time so
+  two requests cannot both read "149 of 150". "Today" is `TIMEZONE`.
+- **The model is one line** — `AI_MODEL` in `wrangler.toml`, Opus 5.5 by
+  default. This model always thinks and rejects `temperature`, so the code sends
+  neither; `effort` is the only dial (low for lines and subtasks, medium for
+  pictures, questions and the brief). Requests opt into
+  `fallbacks: "default"`, so a safety-classifier decline on an ordinary work task
+  is re-run on another model instead of coming back empty.
+- **Failures are reported by kind, never by content** — `capped`, `refused`,
+  `not_configured`… — and every caller has the older path to fall back to.
+- **Replies are held to a JSON schema** (`src/lib/prompts.ts`), so "mostly
+  returns JSON" is "always returns JSON"; `parseItems` stays as strict as before.
+
+What the model is told lives in two places: `src/lib/prompts.ts` (the task rules,
+shared with `claude -p`) and `worker/prompts.ts` (subtasks, pictures, questions,
+the brief, and the Bengali register copied from §8).
+
+Proving it:
+
+```bash
+pnpm test:ai                  # a real Worker + Durable Object against a stand-in for the API
+node scripts/ai-smoke.mjs     # one real call per door, printed for a person to read
+node scripts/ai-eval.mjs      # his own history fed back through, to see if it lands where Claude Code did
+```
+
+`test:ai` proves the plumbing and what is *left out* of every request; it cannot
+say how the model behaves on Banglish — that needs a key, which is what the other
+two are for.
+
 ### Where things live
 
 | Path | What |
@@ -376,6 +456,10 @@ Claude Code ──▶ bin/todo.mjs ──▶ data/tasks.json ◀── Rust fs-w
 | `src/components/` | UI |
 | `src/styles/global.css` | every token and every component's styles |
 | `scripts/check-design-system.mjs` | the gate that keeps them honest |
+| `worker/index.ts` | the hub: routing, the Durable Object, the day's budget, the cron |
+| `worker/aiRoutes.ts`, `worker/ai.ts`, `worker/brief.ts` | Claude's doors, the one place that calls it, the morning brief |
+| `src/lib/prompts.ts`, `worker/prompts.ts` | what Claude is told |
+| `src/lib/ai.ts` | the app's side: knocks on the hub, knows whether it is switched on |
 | `src-tauri/src/lib.rs` | storage, watcher, tray, hotkey |
 | `scripts/make-icon.mjs` | regenerates the icon from code |
 
@@ -454,6 +538,19 @@ appears.
 **The version in `package.json`, `src-tauri/tauri.conf.json`,
 `src-tauri/Cargo.toml` and the git tag must all match**, or the updater will not
 offer the release.
+
+**The tag builds the apps. It does not deploy the hub — and the hub is what
+serves the phones.** A phone runs the copy of the app that the Worker serves, so
+a release that never reaches the Worker never reaches a phone, with nothing to
+say so. After any release (and any change under `worker/`):
+
+```bash
+pnpm sync:deploy        # builds first, then `wrangler deploy`
+curl -s https://vault.artist-shawon.workers.dev/ | grep -o 'assets/index-[^"]*\.js'   # compare with dist/
+```
+
+Never run `pnpm test:sync` or `test:ai` against the live hub: the sync test
+*deletes every task* to start from a clean slate. They run against local dev hubs.
 
 Confirm it actually shipped rather than assuming:
 

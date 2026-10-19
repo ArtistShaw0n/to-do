@@ -7,6 +7,7 @@ import { checkReport, isBug, moveBug } from '../lib/bugs';
 import { relativeDue } from '../lib/dates';
 import { projectColor } from '../lib/vault';
 import { NoteGlyph } from './glyphs';
+import { Steps } from './Steps';
 
 /**
  * The third column. Passwords keeps the selected item's fields here rather than
@@ -160,6 +161,8 @@ export function TaskDetail({
           </div>
         </label>
       </div>
+
+      <Steps task={task} onPatch={onPatch} />
 
       {task.project && (
         <div className="detail-chips">

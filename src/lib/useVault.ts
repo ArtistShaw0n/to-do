@@ -6,6 +6,7 @@ import {
   seedSyncConfigFromHost, startLocalPersistence, startSync, type SyncState,
 } from './sync';
 import { startNormaliseWorker } from './normaliseWorker';
+import { useAiStatus } from './ai';
 
 interface UseVault {
   vault: Vault | null;
@@ -116,15 +117,20 @@ export function useVault(): UseVault {
   }, [refresh]);
 
   /**
-   * Finish what the phones could not.
+   * Finish what could not be finished where it was typed.
    *
-   * Only on a Mac, and only once the hub is connected — there is nothing to
-   * pick up otherwise, and the CLI this leans on lives here.
+   * On a Mac always, once the hub is connected — it has Claude Code to lean on
+   * as well as the hub's API. Anywhere else only while the hub's API is
+   * switched on and within today's ceiling, because that is all such a device
+   * has: with it, a phone can finish a task another phone could not.
    */
+  const ai = useAiStatus();
+  const aiOn = !!ai?.configured && ai.used < ai.cap;
   useEffect(() => {
-    if (!('__TAURI_INTERNALS__' in window) || sync !== 'online') return;
-    return startNormaliseWorker(mutate);
-  }, [sync, mutate]);
+    const hasCli = '__TAURI_INTERNALS__' in window;
+    if (sync !== 'online' || !(hasCli || aiOn)) return;
+    return startNormaliseWorker(mutate, hasCli);
+  }, [sync, mutate, aiOn]);
 
 
   return { vault, path: 'local store', error, sync, mutate, reload };

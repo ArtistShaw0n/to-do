@@ -9,16 +9,21 @@ import {
 import {
   applyItems, buildPrompt, looksLikeSecret, noteFields, noteLocally, normaliseLocally,
   parseItems, taskFields,
-  type NoteDraft, type ViewContext,
+  type NoteDraft, type TaskDraft, type ViewContext,
 } from './lib/normalise';
 import { useVault } from './lib/useVault';
 import { NoteDetail, TaskDetail } from './components/DetailPane';
 import {
-  CheckGlyph, NoteGlyph, SearchGlyph, SendGlyph, ViewGlyph, type ViewGlyphName,
+  CheckGlyph, ImageGlyph, NoteGlyph, SearchGlyph, SendGlyph, ViewGlyph, type ViewGlyphName,
 } from './components/glyphs';
 import { SyncBadge, SyncSetup, hasSyncConfig } from './components/SyncSetup';
 import { checkReport, isBug, sortBugs } from './lib/bugs';
-import { Brief } from './components/Brief';
+import { Answer, Brief } from './components/Brief';
+import {
+  aiAsk, aiBrief, aiImage, aiNormalise, aiReady, describeAiError, prepareImage,
+  refreshAiStatus, useAiStatus,
+} from './lib/ai';
+import { PictureReview } from './components/PictureReview';
 import { briefDismissed, briefFor, dismissBrief } from './lib/digest';
 import { NotesLock } from './components/NotesLock';
 import { encryptValue, hasLock, lockNotes, revealNotes } from './lib/lock';
@@ -53,6 +58,69 @@ export default function App() {
   // its own because the dismissal records the date, not a flag.
   const [briefRead, setBriefRead] = useState(() => briefDismissed(todayISO()));
   const brief = vault ? briefFor(vault) : null;
+
+  /**
+   * Whether the hub can think. Asked once the hub is reachable and again each
+   * time the window comes back to the front — a day's ceiling or a newly added
+   * key can change while the app sits in the menu bar.
+   */
+  const ai = useAiStatus();
+  const aiOn = !!ai?.configured && ai.used < ai.cap;
+  useEffect(() => {
+    if (sync !== 'online') return;
+    void refreshAiStatus();
+    const again = () => { if (document.visibilityState === 'visible') void refreshAiStatus(); };
+    document.addEventListener('visibilitychange', again);
+    return () => document.removeEventListener('visibilitychange', again);
+  }, [sync]);
+
+  /**
+   * A question about the list, and the answer. Held here, not stored: it is a
+   * reply to a moment, and tomorrow's list will answer differently.
+   */
+  const [answer, setAnswer] = useState<
+    { question: string; text?: string; error?: string } | null
+  >(null);
+
+  const ask = async () => {
+    const question = query.trim();
+    if (!vault || question.length < 3) return;
+    setAnswer({ question });
+    try {
+      setAnswer({ question, text: await aiAsk(question, vault) });
+    } catch (err) {
+      setAnswer({ question, error: describeAiError(err) });
+    }
+  };
+
+  /**
+   * A picture being turned into tasks: a line of progress while it is read,
+   * then the reviewed list. Neither is stored — the tasks are written only when
+   * the review is accepted.
+   */
+  const [reading, setReading] = useState<string | null>(null);
+  const [picture, setPicture] = useState<{ items: TaskDraft[] } | null>(null);
+
+  /** Today's brief, rewritten on request. It arrives through sync like any row. */
+  const [refreshingBrief, setRefreshingBrief] = useState(false);
+  const refreshBrief = async () => {
+    setRefreshingBrief(true);
+    try { await aiBrief(true); } catch { /* the old brief stays */ } finally { setRefreshingBrief(false); }
+  };
+
+  /**
+   * No brief yet today and the hub can write one: ask for it. The hub's own
+   * morning job normally got there first, so this is the case where it could
+   * not — a new key, a day the job failed. Once per device per day, so a hub
+   * that cannot answer is not asked on every focus.
+   */
+  const askedForBrief = useRef('');
+  useEffect(() => {
+    const day = todayISO();
+    if (!vault || brief || !ai?.configured || askedForBrief.current === day) return;
+    askedForBrief.current = day;
+    void aiBrief(false).catch(() => { /* nothing to show is not a failure */ });
+  }, [vault, brief, ai?.configured]);
 
   /**
    * The Notes key, in memory only.
@@ -199,10 +267,18 @@ export default function App() {
     } as Record<View, number>;
   }, [vault]);
 
+  /**
+   * While an answer is showing, the text in the search box is a question, not a
+   * filter. Applying it as both emptied the list under the very answer that
+   * talks about it — "Nothing here", beneath a reply naming five tasks.
+   */
+  const asking = answer !== null;
+
   const items = useMemo<(Task | Note)[]>(() => {
     if (!vault) return [];
+    const filter = asking ? '' : query;
     if (view === 'notes') {
-      return sortNotes(searchNotes(revealed ?? vault.notes, query));
+      return sortNotes(searchNotes(revealed ?? vault.notes, filter));
     }
 
     const live = vault.tasks.filter(isOpen);
@@ -220,8 +296,8 @@ export default function App() {
       }
     })();
 
-    return searchTasks(chosen, query);
-  }, [vault, view, query, revealed]);
+    return searchTasks(chosen, filter);
+  }, [vault, view, query, revealed, asking]);
 
   /**
    * Two lists carry headings, for the same reason and by different axes.
@@ -296,6 +372,46 @@ export default function App() {
 
   const themeLabel = theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark';
 
+  /** The open category as context for a task that does not say where it belongs. */
+  const viewContext = (): ViewContext => ({
+    ...(view === 'personal' ? { project: PERSONAL } : {}),
+    ...(view === 'bugs' ? { tags: ['bug'] } : {}),
+  });
+
+  const readPicture = async (file: Blob) => {
+    if (!vault) return;
+    setReading('Reading the picture…');
+    try {
+      const image = await prepareImage(file);
+      const text = await aiImage(image, vault);
+
+      // A picture with nothing in it is a valid answer, not a failure: the
+      // reviewer says so, instead of an error that sounds like something broke.
+      let items: TaskDraft[] = [];
+      try {
+        items = parseItems(text, '', normaliseLocally('', vault))
+          .filter((i): i is TaskDraft => i.type === 'task');
+      } catch (err) {
+        if (!(err instanceof Error && /no usable item/.test(err.message))) throw err;
+      }
+      setReading(null);
+      setPicture({ items });
+    } catch (err) {
+      setReading(describeAiError(err));
+      setTimeout(() => setReading(null), 6000);
+    }
+  };
+
+  const addFromPicture = (items: TaskDraft[]) => {
+    const ctx = viewContext();
+    void mutate((v) => items.reduce((acc, item) => addTask(acc, {
+      ...taskFields(item),
+      project: ctx.project ?? item.project,
+      tags: ctx.tags ? [...new Set([...item.tags, ...ctx.tags])] : item.tags,
+    }), v));
+    setPicture(null);
+  };
+
   /**
    * Anything typed in belongs to the category that is open.
    *
@@ -331,10 +447,11 @@ export default function App() {
         ? { tags: [...local.tags, 'bug'] } : {}),
     };
 
-    // A device that cannot run Claude says so, and a Mac picks it up later.
-    // Without this a task typed on a phone would keep the wording it was typed
-    // in for good, while the same words typed on a Mac came out translated.
-    const canNormalise = '__TAURI_INTERNALS__' in window;
+    // A device that can reach neither the hub's Claude nor one of its own says
+    // so, and a Mac picks the task up later. Without this a task typed on a
+    // phone with no signal would keep the wording it was typed in for good,
+    // while the same words typed anywhere else came out translated.
+    const canNormalise = inTauri || aiReady();
 
     void mutate((v) => addTask(v, {
       id, ...taskFields(local), ...fromView,
@@ -344,7 +461,13 @@ export default function App() {
   };
 
   /**
-   * Hand the raw text to Claude Code and fold the better version back in.
+   * Hand the raw text to Claude and fold the better version back in.
+   *
+   * Two places can answer, tried in this order. The hub's API works from any
+   * device and needs no Mac awake; Claude Code on this machine is the old path
+   * and the fallback when the hub cannot — no key yet, today's ceiling spent,
+   * no signal. A line that turned out to be a note is never sent to the hub: it
+   * may be a password, and the hub's job here is tasks.
    *
    * One typed line is not always one entry: it can be two tasks, or a note
    * rather than a task. So the placeholder is reused only when the first item
@@ -359,8 +482,24 @@ export default function App() {
   ) => {
     setBusy((b) => new Set(b).add(id));
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const text = await invoke<string>('normalise_task', { prompt: buildPrompt(raw, vault) });
+      let text: string | undefined;
+
+      if (placeholder === 'task' && aiReady()) {
+        try { text = await aiNormalise(raw, vault); } catch { /* the old path is next */ }
+      }
+
+      if (text === undefined && inTauri) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        text = await invoke<string>('normalise_task', { prompt: buildPrompt(raw, vault) });
+      }
+
+      // Nowhere to run it from here after all. Flag the task for a device that
+      // can, exactly as if this one had known from the start.
+      if (text === undefined) {
+        if (placeholder === 'task') await mutate((v) => updateTask(v, id, { needsNormalise: true }));
+        return;
+      }
+
       const items = parseItems(text, raw, normaliseLocally(raw, vault));
       await mutate((v) => applyItems(v, id, placeholder, items, fromView));
     } catch {
@@ -375,6 +514,16 @@ export default function App() {
       });
     }
   };
+
+  if (picture) {
+    return (
+      <PictureReview
+        items={picture.items}
+        onAdd={addFromPicture}
+        onCancel={() => setPicture(null)}
+      />
+    );
+  }
 
   return (
     <>
@@ -460,6 +609,8 @@ export default function App() {
           <Brief
             digest={brief}
             onDismiss={() => { dismissBrief(brief.date); setBriefRead(true); }}
+            onRefresh={aiOn ? () => void refreshBrief() : undefined}
+            refreshing={refreshingBrief}
           />
         )}
 
@@ -499,14 +650,40 @@ export default function App() {
             autoCapitalize="off"
             enterKeyHint="search"
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') setQuery(''); }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setQuery('');
+              else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && aiOn && view !== 'notes') void ask();
+            }}
           />
+          {aiOn && view !== 'notes' && query.trim().length >= 3 && (
+            <button
+              className="search-ask"
+              title="Ask Claude about your tasks (⌘↵)"
+              disabled={!!answer && !answer.text && !answer.error}
+              onClick={() => void ask()}
+            >
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor"
+                strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M8 1.8l1.4 3.8 3.8 1.4-3.8 1.4L8 12.2 6.6 8.4 2.8 7l3.8-1.4z" />
+              </svg>
+              Ask
+            </button>
+          )}
           {query && (
             <button className="search-clear" aria-label="Clear search" onClick={() => setQuery('')}>
               ×
             </button>
           )}
         </div>
+
+        {answer && view !== 'notes' && (
+          <Answer
+            question={answer.question}
+            text={answer.text}
+            error={answer.error}
+            onDismiss={() => setAnswer(null)}
+          />
+        )}
 
         {selecting && (
           <div className="select-bar">
@@ -595,7 +772,22 @@ export default function App() {
           </div>
         )}
 
-        {view !== 'done' && <Composer noun={view === 'notes' ? 'note' : 'task'} onAdd={add} />}
+        {reading && (
+          <div className="undo-bar" role="status">
+            <span>{reading}</span>
+          </div>
+        )}
+
+        {view !== 'done' && (
+          <Composer
+            noun={view === 'notes' ? 'note' : 'task'}
+            onAdd={add}
+            // Pictures become tasks, so only where tasks are typed, and only
+            // when the hub can read one.
+            onImage={aiOn && view !== 'notes' ? (file) => void readPicture(file) : undefined}
+            reading={reading === 'Reading the picture…'}
+          />
+        )}
       </main>
 
       {update && (
@@ -717,7 +909,7 @@ function TaskCard({
             </div>
           ) : null}
           {task.notes && !done && <div className="card-notes">{task.notes}</div>}
-          {(task.project || task.tags.length > 0) && !done && (
+          {(task.project || task.tags.length > 0 || task.subtasks.length > 0) && !done && (
             <div className="card-meta">
               {task.project && (
                 <span className="chip" style={{ '--chip': color } as React.CSSProperties}>
@@ -725,6 +917,11 @@ function TaskCard({
                 </span>
               )}
               {task.tags.map((t) => <span key={t} className="chip chip-tag">{t}</span>)}
+              {task.subtasks.length > 0 && (
+                <span className="chip chip-tag" title="Subtasks done">
+                  {task.subtasks.filter((x) => x.done).length}/{task.subtasks.length} subtasks
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -783,8 +980,17 @@ function NoteCard({
 
 // Composer ───────────────────────────────────────────────────────────────────
 
-function Composer({ noun, onAdd }: { noun: string; onAdd: (raw: string) => void }) {
+function Composer({
+  noun, onAdd, onImage, reading,
+}: {
+  noun: string;
+  onAdd: (raw: string) => void;
+  /** Present only when a picture can be turned into tasks. */
+  onImage?: (file: Blob) => void;
+  reading?: boolean;
+}) {
   const [value, setValue] = useState('');
+  const picker = useRef<HTMLInputElement>(null);
 
   // Hands the line over verbatim. Pulling the date out here as well would mean
   // two different parsers disagreeing about the same sentence; `normaliseLocally`
@@ -808,7 +1014,38 @@ function Composer({ noun, onAdd }: { noun: string; onAdd: (raw: string) => void 
             if (e.key === 'Enter') { e.preventDefault(); submit(); }
             else if (e.key === 'Escape') { setValue(''); e.currentTarget.blur(); }
           }}
+          // A screenshot pasted straight in is the quickest way to hand one
+          // over: ⌘⇧4, then ⌘V.
+          onPaste={(e) => {
+            const file = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'));
+            if (file && onImage) { e.preventDefault(); onImage(file); }
+          }}
         />
+        {onImage && (
+          <>
+            <input
+              ref={picker}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = ''; // so the same picture can be chosen twice
+                if (file) onImage(file);
+              }}
+            />
+            <button
+              className="composer-send"
+              aria-label="Add tasks from a picture"
+              title="Add tasks from a screenshot or photo"
+              disabled={reading}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => picker.current?.click()}
+            >
+              <ImageGlyph />
+            </button>
+          </>
+        )}
         <button
           className="composer-send"
           data-ready={value.trim().length > 0}

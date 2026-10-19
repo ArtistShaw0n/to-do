@@ -1,10 +1,13 @@
 /**
- * The Mac that finishes what the phones start.
+ * Whoever can, finishing what could not be finished where it was typed.
  *
- * A phone has no Claude CLI, so a task typed there gets only the offline pass:
- * the dates and tags are recognised, but the sentence stays as it was written.
- * The Mac is already running all day and already has the CLI, so it takes those
- * over and rewrites them properly — which is why nothing here costs anything.
+ * A task typed with no way to reach Claude — a phone with no signal, a hub
+ * whose day's ceiling was spent — gets only the offline pass: the dates and
+ * tags are recognised, but the sentence stays as it was written. It is flagged,
+ * and any device that *can* reach Claude takes it over and rewrites it
+ * properly. That is the Mac, which has the CLI and the hub's API, and also any
+ * other device that is open and can reach the hub's API: with the Mac off, the
+ * phone in your hand is enough.
  *
  * Two Macs will both see the same pending task, so a job is claimed before it
  * is run: write your device id, wait, read it back, and only proceed if it is
@@ -17,6 +20,7 @@ import type { Task, Vault } from './types';
 import { buildPrompt, normaliseLocally, parseItems, taskFields } from './normalise';
 import { applyItems } from './normalise';
 import { currentVault, deviceId } from './sync';
+import { aiNormalise, aiReady } from './ai';
 
 /** How long a claim is honoured before another machine may take the job. */
 const CLAIM_TIMEOUT_MS = 2 * 60 * 1000;
@@ -26,6 +30,9 @@ const CLAIM_SETTLE_MS = 1200;
 
 /** Breathing room between jobs, so a backlog does not saturate the CLI. */
 const BETWEEN_JOBS_MS = 1500;
+
+/** After a device finds it cannot do the work at all, how long before it tries again. */
+const RETRY_AFTER_MS = 5 * 60 * 1000;
 
 function isClaimable(task: Task, now: number): boolean {
   if (!task.needsNormalise) return false;
@@ -47,10 +54,14 @@ export function pendingTasks(vault: Vault, now = Date.now()): Task[] {
  */
 export function startNormaliseWorker(
   mutate: (fn: (v: Vault) => Vault) => Promise<void>,
+  /** True on a Mac, where Claude Code is also an option behind the hub's API. */
+  hasCli: boolean,
 ): () => void {
   let stopped = false;
   let running = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** Set when a job could not be done from here; nothing is claimed until it passes. */
+  let pausedUntil = 0;
 
   const me = deviceId();
 
@@ -68,21 +79,49 @@ export function startNormaliseWorker(
     return mine?.claimedBy === me && mine?.needsNormalise === true;
   };
 
-  const finish = async (task: Task) => {
+  /** Hand a claimed job back untouched, for a device that can do it. */
+  const release = (task: Task) => mutate((v) => ({
+    ...v,
+    tasks: v.tasks.map((t) => (t.id === task.id
+      ? { ...t, claimedBy: undefined, claimedAt: undefined }
+      : t)),
+  }));
+
+  const finish = async (task: Task): Promise<boolean> => {
     const raw = task.originalInput?.trim() || task.title;
     let rewritten = false;
+    let text: string | undefined;
+
+    // The hub's API first: it needs nothing but a connection. Then, on a Mac,
+    // Claude Code — the way this worked before there was an API.
+    if (aiReady()) {
+      try { text = await aiNormalise(raw, currentVault()); } catch { /* next */ }
+    }
+    if (text === undefined && hasCli) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        text = await invoke<string>('normalise_task', { prompt: buildPrompt(raw, currentVault()) });
+      } catch { /* no CLI, or a lapsed login */ }
+    }
+
+    // Nothing here can do it. On a device with no CLI that is not the task's
+    // fault — the hub was out of reach, or its ceiling was spent — so the job
+    // goes back to the queue still flagged, rather than being marked done and
+    // lost. (A Mac clears the flag regardless, below: it has tried everything.)
+    if (text === undefined && !hasCli) {
+      await release(task);
+      pausedUntil = Date.now() + RETRY_AFTER_MS;
+      return false;
+    }
 
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const text = await invoke<string>('normalise_task', {
-        prompt: buildPrompt(raw, currentVault()),
-      });
-      const items = parseItems(text, raw, normaliseLocally(raw, currentVault()));
-      await mutate((v) => applyItems(v, task.id, 'task', items));
-      rewritten = true;
+      if (text !== undefined) {
+        const items = parseItems(text, raw, normaliseLocally(raw, currentVault()));
+        await mutate((v) => applyItems(v, task.id, 'task', items));
+        rewritten = true;
+      }
     } catch {
-      // No CLI, a lapsed login, or a reply that was not JSON. The task keeps
-      // what the phone gave it.
+      // A reply that was not usable. The task keeps what the phone gave it.
     }
 
     // Clear the flag whichever way it went: retrying forever would mean a
@@ -102,7 +141,7 @@ export function startNormaliseWorker(
   };
 
   const tick = async () => {
-    if (stopped || running) return;
+    if (stopped || running || Date.now() < pausedUntil) return;
     running = true;
     try {
       const [next] = pendingTasks(currentVault());

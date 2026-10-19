@@ -1072,6 +1072,27 @@ body {
 
 .search-input::placeholder { color: var(--text-3); }
 
+/* Sends what is typed in the search as a question to Claude. Only appears when
+   the hub can answer, and only once there is something worth asking. */
+.search-ask {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  height: 24px;
+  padding: 0 var(--s-2);
+  border: 0;
+  border-radius: var(--r-pill);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  font: inherit;
+  font-size: var(--t-caption);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.search-ask:disabled { opacity: 0.5; cursor: default; }
+
 .search-clear {
   flex: none;
   width: 20px;
@@ -1187,6 +1208,130 @@ body {
 
 .bug-panel { margin-top: var(--s-3); }
 
+/* Steps ──────────────────────────────────────────────────────────────────── */
+
+/* The steps inside a task: a list you tick through, then a field to add more.
+   Spaced as items of one list — the 8px step — with the label tight above it. */
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+.steps-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-size: var(--t-caption);
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.steps-count { font-weight: 500; letter-spacing: 0; }
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.step .check { cursor: pointer; }
+
+.step-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-body);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.step[data-done] .step-text { color: var(--text-3); text-decoration: line-through; }
+
+.step-del {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text-3);
+  background: transparent;
+  font-size: var(--t-lead);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.step-del:hover { color: var(--danger); }
+
+.steps-suggest { align-self: flex-start; gap: var(--s-1); display: inline-flex; align-items: center; }
+
+/* What Claude proposed, held until it is accepted. */
+.step-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border-radius: var(--r-control);
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--stroke);
+}
+
+.step-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  font-size: var(--t-body);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.step-pick input { margin-top: 2px; accent-color: var(--primary); }
+
+.step-proposal-actions { display: flex; gap: var(--s-2); }
+
+.step-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Tasks read from a picture ───────────────────────────────────────────────── */
+
+.review-list { display: flex; flex-direction: column; gap: var(--s-3); }
+
+.review-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+}
+
+.review-row[data-off] .review-main { opacity: 0.45; }
+
+.review-tick { margin-top: var(--s-2); accent-color: var(--primary); }
+
+.review-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+.review-note { font-size: var(--t-small); color: var(--text-3); }
+
 /* Daily brief ────────────────────────────────────────────────────────────── */
 
 /* Sits above the list, below the tiles. Prominent surface rather than a card,
@@ -1222,6 +1367,24 @@ body {
   text-transform: uppercase;
   color: var(--text-3);
 }
+
+/* A question's answer: the question as a quiet line above, and a wait or a
+   failure in plain text in place of the body. */
+.brief-lead {
+  margin: 0 0 var(--s-1);
+  font-size: var(--t-small);
+  color: var(--text-3);
+}
+
+.brief-notice {
+  margin: 0;
+  font-size: var(--t-body);
+  color: var(--text-2);
+}
+
+.brief-notice[data-error] { color: var(--danger); }
+
+.brief-close:disabled { opacity: 0.4; cursor: default; }
 
 .brief-close {
   flex: none;

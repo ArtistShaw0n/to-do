@@ -129,3 +129,15 @@ export function SendGlyph({ size = 15 }: { size?: number }) {
     </svg>
   );
 }
+
+/** A picture, for "add tasks from a screenshot". */
+export function ImageGlyph({ size = 15 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="3" width="12" height="10" rx="2" />
+      <circle cx="6" cy="7" r="1.1" />
+      <path d="M2.6 12l3.4-3.2 2.6 2.4 2-1.8 2.8 2.6" />
+    </svg>
+  );
+}

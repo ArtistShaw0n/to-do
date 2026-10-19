@@ -14,6 +14,7 @@ import { createLock, unlock, type LockConfig } from '../lib/lock';
 export function NotesLock({
   config,
   count,
+  saving,
   onUnlocked,
   onCreated,
   onCancel,
@@ -22,6 +23,8 @@ export function NotesLock({
   config: LockConfig | null;
   /** How many notes are behind the gate, so it is clear what is being protected. */
   count: number;
+  /** The title of a note typed while locked, waiting for the PIN to be saved. */
+  saving?: string;
   onUnlocked: (key: CryptoKey) => void;
   onCreated: (config: LockConfig, key: CryptoKey) => void;
   onCancel: () => void;
@@ -83,7 +86,9 @@ export function NotesLock({
           <p className="sheet-date">
             {setting
               ? `${count} ${count === 1 ? 'note' : 'notes'} · nothing is encrypted yet`
-              : 'Locked'}
+              : saving
+                ? `Enter the PIN to save “${saving}”`
+                : 'Locked'}
           </p>
         </div>
         <button className="theme-btn" aria-label="Back" onClick={onCancel}>

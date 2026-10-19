@@ -9,10 +9,11 @@
 
 import { webcrypto } from 'node:crypto';
 import {
-  createLock, decryptValue, encryptValue, isEncrypted, lockNotes, revealNotes, unlock,
-  unlockedSecrets,
+  applySealed, createLock, decryptValue, encryptValue, isEncrypted, lockNotes, revealNotes,
+  sealPending, unlock, unlockedSecrets,
 } from '../src/lib/lock';
 import type { Note } from '../src/lib/types';
+import { looksLikeSecret, noteLocally } from '../src/lib/normalise';
 
 if (!globalThis.crypto) (globalThis as { crypto?: Crypto }).crypto = webcrypto as unknown as Crypto;
 
@@ -90,6 +91,68 @@ check('locking an already-locked set changes nothing',
   JSON.stringify(twice) === JSON.stringify(locked));
 check('anything written before the PIN existed is found',
   unlockedSecrets([...locked, note({ id: 'n4', secret: 'plain' })]).length === 1);
+
+// ── A secret that is born plaintext after the PIN exists ─────────────────────
+//
+// Typed into the composer, added through the CLI, or written by an older copy of
+// the app on another device: each lands readable, and each must be sealed.
+
+const mixed = [
+  ...locked,
+  note({ id: 'n5', title: 'Typed after the PIN', secret: '9911' }),
+  note({ id: 'n6', title: 'No secret at all', secret: undefined }),
+];
+const plan = await sealPending(mixed, key);
+check('only the plaintext secret is queued for sealing', plan.length === 1 && plan[0].id === 'n5');
+check('what is queued is encrypted, not the plaintext again',
+  isEncrypted(plan[0].sealed) && plan[0].sealed !== '9911');
+
+const sealedSet = applySealed(mixed, plan);
+check('after sealing, nothing plaintext is left', unlockedSecrets(sealedSet).length === 0);
+check('the sealed secret reads back to what was typed',
+  (await decryptValue(sealedSet.find((n) => n.id === 'n5')!.secret!, key)) === '9911');
+check('already-encrypted notes are byte-for-byte untouched',
+  JSON.stringify(sealedSet.slice(0, locked.length)) === JSON.stringify(locked));
+check('a note with no secret stays without one', sealedSet.find((n) => n.id === 'n6')!.secret === undefined);
+check('the plaintext never survives in what would be stored', !JSON.stringify(sealedSet).includes('9911'));
+
+// Encryption is async, so the vault can move on while it runs. Sealing must not
+// put an old value back over a newer one.
+const movedOn = mixed.map((n) => (n.id === 'n5' ? { ...n, secret: 'changed-meanwhile' } : n));
+const afterMove = applySealed(movedOn, plan);
+check('a secret edited in the meantime is not overwritten by the stale seal',
+  afterMove.find((n) => n.id === 'n5')!.secret === 'changed-meanwhile');
+check('…and is simply sealed on the next pass',
+  (await sealPending(afterMove, key)).length === 1);
+
+check('sealing an all-sealed set finds nothing to do', (await sealPending(sealedSet, key)).length === 0);
+
+// ── A note made on the device never carries its secret in its title ──────────
+//
+// The title is the one field the PIN does not encrypt, so a value that lands
+// there is on the hub in the clear however well the secret field is sealed.
+// `noteLocally` used to fall back to the raw line when cleaning emptied the
+// title — which is exactly what a line made only of secret words and a value does.
+
+for (const [line, secret] of [
+  ['tab er pass 5665', '5665'],
+  ['wifi key 8823sd91', '8823sd91'],
+  ['pin 5665', '5665'],
+  ['pin 5665 5665', '5665'],
+  ['PIN: 4471', '4471'],
+  ['Netflix login me@x.com pass Qw12', 'Qw12'],
+] as const) {
+  const made = noteLocally(line);
+  check(`"${line}" — the value is split out into the secret`, made.secret === secret, String(made.secret));
+  check(`"${line}" — and is absent from the title`, !made.title.includes(secret), made.title);
+  check(`"${line}" — the title is not empty`, made.title.trim().length > 0);
+}
+// (The composer only reaches for `noteLocally` when a line has a value in it, or
+// states a passcode; a line with neither is kept word for word, by `add`.)
+check('a line with no value has no secret to protect',
+  noteLocally('Gym locker combination is on the red keyring').secret === undefined);
+check('a line that merely states a passcode is recognised', looksLikeSecret('wifi key 8823sd91'));
+check('a line that asks for work on a login is not', !looksLikeSecret('portal er login page ta thik korte hobe'));
 
 for (const [n, ok, d] of results) console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d ? `  — ${d}` : ''}`);
 const failed = results.filter(([, ok]) => !ok).length;

@@ -217,11 +217,16 @@ normalised on the spot, in two passes:
    and priority tables above, existing project names, kind and module tags — and
    the entry appears immediately in Shawon's own wording. `looksLikeSecret`
    diverts a line that merely states a passcode (`tab er pass 5665`) into a Note
-   instead, so a secret never sits in a task title even briefly.
+   instead, so a secret never sits in a task title even briefly. **A note is made
+   entirely on the device by `noteLocally` and never shown to any model** — not the
+   hub's API, not `claude -p`. The Notes PIN exists so that a secret is readable by
+   nobody but its owner; sending it to a model first would undo that at the door.
+   (Typing into the Notes view works the same way: a line with a value in it is
+   split by `noteLocally` so the part the lock encrypts is the part that needs it.)
 2. The app then asks Claude, in this order: **the hub's API** (any device, no Mac
    needed — see *Claude in the hub* in §5), then `claude -p` on a Mac (the
    `normalise_task` command in `src-tauri/src/lib.rs`). `applyItems` folds the
-   reply back in. A line that turned out to be a note is never sent to the hub.
+   reply back in. Only task lines come here.
 
 The reply is a **list**, because one typed line is not always one entry. It can
 be two tasks — "invoice pathate hobe ar PR review korte hobe" — or a note rather
@@ -238,6 +243,36 @@ a time word, a priority word or a module here and it has to go in that file's
 tables and in `src/lib/prompts.ts` too — that file holds the rules text that both
 `claude -p` and the hub's API are given — or the app and the CLI will disagree
 about the same sentence.
+
+### Notes and the PIN
+
+A note holds reference material — a PIN, a wifi key, a login. Its `secret` field
+is encrypted (AES-GCM, key derived from his PIN with PBKDF2, `src/lib/lock.ts`)
+so the hub and the other devices only ever hold ciphertext. **Titles, usernames
+and URLs stay readable, and are not encrypted** — so a value must never sit in one.
+
+How a secret gets to be encrypted, and the one place it cannot be:
+
+- **Typed in the app** — the secret is encrypted *before* the first write, never
+  after, so it is never readable on the hub even for a moment. With a PIN set and
+  Notes locked, the app asks for the PIN to save the note (it holds the line in
+  memory only, and writes it already sealed).
+- **Born plaintext some other way** — added through the CLI, written by an older
+  copy of the app, produced when the model reads a line the local check let
+  through. The app **seals these the moment it holds the key** (`sealPending`),
+  and on every unlock. Until then they are readable on the hub.
+- **The CLI cannot encrypt** — it has no PIN. `note add --secret` / `note edit
+  --secret` therefore print a warning when a PIN is set. **Prefer asking him to
+  type a secret into the app.** If he tells you a secret in chat, say that it will
+  sit readable on the hub until the app next unlocks, and offer the alternative.
+- **A line is never both a secret and an input to a model.** `noteLocally` makes
+  the note on the device. Its title is whatever is left once the value is taken
+  out (`wifi key 8823sd91` → title `wifi key`), and never the raw line — the raw
+  line is the value.
+
+`pnpm test:lock` holds each of these as a named promise. There is no recovery: a
+forgotten PIN means the secrets are gone and the notes remain, by design — a
+recovery path is a second key, and a second key is a second way in.
 
 ### Judgement calls
 
@@ -408,11 +443,11 @@ off: `GET /ai/status` says `configured: false` and the app hides the buttons.
 Auth is the sync key as `Authorization: Bearer …` (a `fetch` can set a header; a
 browser WebSocket cannot). The rules that are not negotiable:
 
-- **Notes never reach the API.** The doors take tasks; `describeTasks` in
+- **Notes never reach a model.** The doors take tasks; `describeTasks` in
   `worker/prompts.ts` names the only fields it reads and drops the rest, so a
   client sending a whole task cannot make its notes, original wording or
-  evidence links travel. The one exception is older and not part of this: a
-  secret-looking line typed on a Mac still goes to `claude -p`, as it always did.
+  evidence links travel. And the composer never sends a note-shaped line anywhere
+  (see §2), on the Mac's `claude -p` path as much as on the hub's.
 - **Purposes, not a pipe.** There is no "send this prompt" route. The prompts
   live on the hub, so a leaked sync key buys four narrow doors and a ceiling,
   not the credit.

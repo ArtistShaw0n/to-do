@@ -26,7 +26,9 @@ import {
 import { PictureReview } from './components/PictureReview';
 import { briefDismissed, briefFor, dismissBrief } from './lib/digest';
 import { NotesLock } from './components/NotesLock';
-import { encryptValue, hasLock, lockNotes, revealNotes } from './lib/lock';
+import {
+  applySealed, encryptValue, hasLock, lockNotes, revealNotes, sealPending, unlockedSecrets,
+} from './lib/lock';
 import { Settings } from './components/Settings';
 
 type ThemeMode = 'system' | 'light' | 'dark';
@@ -139,6 +141,56 @@ export default function App() {
     void revealNotes(vault.notes, lockKey).then((n) => { if (!cancelled) setRevealed(n); });
     return () => { cancelled = true; };
   }, [vault, lockKey]);
+
+  /**
+   * Seal whatever arrived readable.
+   *
+   * A PIN protects the notes that existed when it was set and the ones edited in
+   * the app since. It did not protect a secret *born* plaintext afterwards — one
+   * added through the CLI, one from an older copy of the app on another device —
+   * which sat in the vault and on the hub as readable text until somebody
+   * happened to edit it. With the key in hand, those are sealed the moment they
+   * are seen. Without it they wait, and the next unlock does this.
+   */
+  useEffect(() => {
+    if (!vault || !lockKey || !hasLock(vault) || !unlockedSecrets(vault.notes).length) return;
+    let cancelled = false;
+    void sealPending(vault.notes, lockKey).then((plan) => {
+      if (cancelled || !plan.length) return;
+      void mutate((v) => ({ ...v, notes: applySealed(v.notes, plan) }));
+    });
+    return () => { cancelled = true; };
+  }, [vault, lockKey, mutate]);
+
+  /**
+   * A note typed while Notes is locked, waiting for the PIN.
+   *
+   * It cannot be saved yet: its secret would have to be written readable, on the
+   * hub, until the next unlock. So it is held here — in memory only — while the
+   * PIN is asked for, and written already sealed.
+   */
+  const [pendingNote, setPendingNote] = useState<{ id: string; note: NoteDraft } | null>(null);
+
+  /**
+   * Write a note, sealing its secret first when a PIN exists.
+   *
+   * The seal happens *before* the write, not after: sealing afterwards would
+   * still put the readable value on the hub for the moment in between, which is
+   * the thing the PIN is there to prevent. With no key to hand — Notes is locked
+   * and the line was typed somewhere else — the PIN is asked for instead.
+   */
+  const saveNote = async (id: string, note: NoteDraft, key: CryptoKey | null = lockKey) => {
+    const fields = noteFields(note);
+    if (fields.secret && vault && hasLock(vault)) {
+      if (!key) {
+        setPendingNote({ id, note });
+        setAskingPin(true);
+        return;
+      }
+      fields.secret = await encryptValue(fields.secret, key);
+    }
+    await mutate((v) => addNote(v, { id, ...fields }));
+  };
   const [view, setView] = useState<View>('all');
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -353,8 +405,17 @@ export default function App() {
       <NotesLock
         config={vault.meta.lock ?? null}
         count={vault.notes.length}
-        onCancel={() => { setAskingPin(false); if (locked) setView('all'); }}
-        onUnlocked={(key) => { setLockKey(key); setAskingPin(false); }}
+        saving={pendingNote?.note.title}
+        onCancel={() => { setAskingPin(false); setPendingNote(null); if (locked) setView('all'); }}
+        onUnlocked={(key) => {
+          setLockKey(key);
+          setAskingPin(false);
+          if (pendingNote) {
+            const waiting = pendingNote;
+            setPendingNote(null);
+            void saveNote(waiting.id, waiting.note, key);
+          }
+        }}
         onCreated={(config, key) => {
           // Encrypt what is already there in the same write that records the
           // PIN — a gap between the two is a window with a lock and no key.
@@ -426,15 +487,23 @@ export default function App() {
 
     const id = newId();
 
-    // A line that states a passcode is reference material, not work. Catching
-    // that here rather than leaving it to Claude keeps the value out of a task
-    // title for the fifteen seconds the model takes to answer.
+    // A line that states a passcode is reference material, not work — and it is
+    // the one kind of line that is never shown to any model, here or on the hub.
+    // The Notes PIN exists so that a secret is readable by nobody but the person
+    // holding it; typing one into the composer and having it go to a model first
+    // would undo that at the very door. So a note is made entirely on this
+    // device, by `noteLocally`, which splits a value out of the title so that the
+    // part the lock encrypts is the part that needs it.
+    //
+    // In the Notes view a line with a value in it is split the same way; a line
+    // with none keeps exactly the words it was typed in, as there is nothing in
+    // it to protect.
     if (view === 'notes' || looksLikeSecret(text)) {
-      const note: NoteDraft = looksLikeSecret(text)
-        ? noteLocally(text)
+      const local = noteLocally(text);
+      const note: NoteDraft = looksLikeSecret(text) || local.secret
+        ? local
         : { type: 'note', kind: 'other', title: text, body: '' };
-      void mutate((v) => addNote(v, { id, ...noteFields(note) }));
-      void enrich(id, text, 'note', {});
+      void saveNote(id, note);
       return;
     }
 
@@ -457,7 +526,7 @@ export default function App() {
       id, ...taskFields(local), ...fromView,
       ...(canNormalise ? {} : { needsNormalise: true }),
     }));
-    if (canNormalise) void enrich(id, text, 'task', fromView);
+    if (canNormalise) void enrich(id, text, fromView);
   };
 
   /**
@@ -466,25 +535,21 @@ export default function App() {
    * Two places can answer, tried in this order. The hub's API works from any
    * device and needs no Mac awake; Claude Code on this machine is the old path
    * and the fallback when the hub cannot — no key yet, today's ceiling spent,
-   * no signal. A line that turned out to be a note is never sent to the hub: it
-   * may be a password, and the hub's job here is tasks.
+   * no signal. Only tasks come here: a line that looks like a secret is handled
+   * in `add` and never leaves the device.
    *
-   * One typed line is not always one entry: it can be two tasks, or a note
-   * rather than a task. So the placeholder is reused only when the first item
-   * comes back as the same kind of thing, and is otherwise dropped in favour of
-   * what Claude actually found. Everything lands in one write.
+   * One typed line is not always one entry: it can be two tasks, or — when the
+   * model reads a line the local check let through — a note rather than a task.
+   * So the placeholder is reused only when the first item comes back as the
+   * same kind of thing, and is otherwise dropped in favour of what Claude
+   * actually found. Everything lands in one write.
    */
-  const enrich = async (
-    id: string,
-    raw: string,
-    placeholder: 'task' | 'note',
-    fromView: ViewContext,
-  ) => {
+  const enrich = async (id: string, raw: string, fromView: ViewContext) => {
     setBusy((b) => new Set(b).add(id));
     try {
       let text: string | undefined;
 
-      if (placeholder === 'task' && aiReady()) {
+      if (aiReady()) {
         try { text = await aiNormalise(raw, vault); } catch { /* the old path is next */ }
       }
 
@@ -496,12 +561,12 @@ export default function App() {
       // Nowhere to run it from here after all. Flag the task for a device that
       // can, exactly as if this one had known from the start.
       if (text === undefined) {
-        if (placeholder === 'task') await mutate((v) => updateTask(v, id, { needsNormalise: true }));
+        await mutate((v) => updateTask(v, id, { needsNormalise: true }));
         return;
       }
 
       const items = parseItems(text, raw, normaliseLocally(raw, vault));
-      await mutate((v) => applyItems(v, id, placeholder, items, fromView));
+      await mutate((v) => applyItems(v, id, 'task', items, fromView));
     } catch {
       // No CLI, a lapsed login, offline, a reply that was not JSON — every one
       // of these leaves a perfectly usable entry behind, so none is worth

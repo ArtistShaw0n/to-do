@@ -149,6 +149,44 @@ export async function revealNotes(notes: Note[], key: CryptoKey): Promise<Note[]
 
 export const hasLock = (vault: Vault): boolean => !!vault.meta.lock;
 
+// ── Sealing what arrives plaintext ───────────────────────────────────────────
+//
+// A PIN protects the notes that exist when it is set and the ones edited in the
+// app afterwards. It does not, by itself, protect a secret that is *born*
+// plaintext later: one typed into the composer, one added through the CLI, one
+// written by an older copy of the app on another device. Each of those lands in
+// the vault — and on the hub — as readable text until something encrypts it.
+// These two functions are that something.
+
+export interface Sealed {
+  id: string;
+  /** What the secret was when it was read, so a change made since is never undone. */
+  plain: string;
+  sealed: string;
+}
+
+/** Encrypt every plaintext secret. Pure of the vault: nothing is written here. */
+export async function sealPending(notes: Note[], key: CryptoKey): Promise<Sealed[]> {
+  return Promise.all(unlockedSecrets(notes).map(async (n) => ({
+    id: n.id,
+    plain: n.secret!,
+    sealed: await encryptValue(n.secret!, key),
+  })));
+}
+
+/**
+ * Put the encrypted values in — but only where the secret is still what was
+ * encrypted. Encryption is async, so the vault may have moved on in between; a
+ * secret edited meanwhile keeps its newer value and is simply sealed next time.
+ */
+export function applySealed(notes: Note[], sealed: Sealed[]): Note[] {
+  const byId = new Map(sealed.map((s) => [s.id, s]));
+  return notes.map((n) => {
+    const s = byId.get(n.id);
+    return s && n.secret === s.plain ? { ...n, secret: s.sealed } : n;
+  });
+}
+
 /** Secrets waiting to be encrypted — anything written before the PIN existed. */
 export const unlockedSecrets = (notes: Note[]): Note[] =>
   notes.filter((n) => n.secret && !isEncrypted(n.secret));

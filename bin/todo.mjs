@@ -616,6 +616,21 @@ commands.digest = (positional, flags) => {
  * tasks because a note is never completed, so it must not reach the counts, the
  * tray badge or the Completed section.
  */
+/**
+ * The CLI has no PIN, so it cannot encrypt. A secret it writes while a PIN
+ * exists is readable on the hub until the app next unlocks Notes and seals it.
+ * Say so at the moment it happens, rather than let "the hub never holds a
+ * plaintext secret" quietly stop being true.
+ */
+function warnIfUnsealed(vault, note) {
+  if (!note.secret || !vault.meta.lock) return;
+  process.stdout.write(
+    `${yellow('!')} A PIN is set, but the CLI cannot encrypt: this secret sits readable on the hub `
+    + `until the app next unlocks Notes and seals it.\n`
+    + `  To keep it off the hub entirely, type it into the app's Notes instead.\n`,
+  );
+}
+
 commands.note = (positional, flags) => {
   const [action, ...rest] = positional;
   const vault = loadVault();
@@ -669,6 +684,7 @@ commands.note = (positional, flags) => {
     vault.notes.push(note);
     saveVault(vault);
     process.stdout.write(`${green('✓ note added')}  ${dim(note.id)}  ${note.title}\n`);
+    warnIfUnsealed(vault, note);
     return;
   }
 
@@ -686,6 +702,7 @@ commands.note = (positional, flags) => {
     note.updatedAt = nowISO();
     saveVault(vault);
     process.stdout.write(`${green('✓ updated')}  ${dim(note.id)}  ${note.title}\n`);
+    if (typeof flags.secret === 'string') warnIfUnsealed(vault, note);
     return;
   }
 

@@ -24,7 +24,7 @@ import { addDays, todayISO } from './dates';
 import {
   addNote, addTask, deleteNote, deleteTask, KIND_TAGS, updateNote, updateTask,
 } from './vault';
-import { NOTE_KINDS, type NoteKind, type Priority, type Vault } from './types';
+import { NOTE_KINDS, NOTE_KIND_META, type NoteKind, type Priority, type Vault } from './types';
 import { normaliseSystem, normaliseUser, type NormaliseContext } from './prompts';
 
 export interface Draft {
@@ -236,7 +236,14 @@ export function noteLocally(raw: string): NoteDraft {
   const text = raw.trim();
   const value = text.match(/(?:^|\s)((?=\S*\d)[A-Za-z0-9@._:-]{3,})(?:\s|$)/);
   const secret = value?.[1];
-  const title = (secret ? text.replace(secret, ' ') : text)
+  const kind = guessNoteKind(text);
+
+  // Every occurrence, not just the first: "pin 5665 5665" must not leave one behind.
+  const withoutSecret = (secret ? text.split(secret).join(' ') : text)
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const cleaned = withoutSecret
     .replace(SECRET_WORDS_ALL, ' ')
     .replace(/\b(er|ta|the|my|amar)\b/gi, ' ')
     .replace(/\s+/g, ' ')
@@ -244,8 +251,13 @@ export function noteLocally(raw: string): NoteDraft {
 
   return {
     type: 'note',
-    kind: guessNoteKind(text),
-    title: title || text,
+    kind,
+    // Never fall back to the raw line. "wifi key 8823sd91" is nothing *but*
+    // secret words and a value, so cleaning it leaves nothing — and the raw line
+    // as a title would put the value in the one field the PIN does not encrypt.
+    // What is left once the value is out is a fine title; a kind's name is the
+    // last resort.
+    title: cleaned || withoutSecret || NOTE_KIND_META[kind].label,
     secret,
     body: '',
   };

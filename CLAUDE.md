@@ -479,6 +479,35 @@ What the model is told lives in two places: `src/lib/prompts.ts` (the task rules
 shared with `claude -p`) and `worker/prompts.ts` (subtasks, pictures, questions,
 the brief, and the Bengali register copied from §8).
 
+**The Durable Object's key-value storage belongs to TinyBase. Never write to it.**
+TinyBase loads the vault by listing *every* key-value entry in the object's storage
+and reading each as one of its own. Anything else there — the daily counter was a
+bare number — makes that load fail, silently; the vault comes back **empty**; and
+the next save writes the emptiness over everything. This happened on 2026-10-19:
+one restart after the first budget was spent, the hub held no tasks. Everything the
+hub stores for itself goes in a SQL table (`ctx.storage.sql`), which that listing
+cannot see. `test:ai` restarts a hub with a spent budget and checks the vault is
+still there; do not remove it.
+
+**If the vault is ever empty or wrong: do not panic, and do not re-enter anything.**
+Cloudflare keeps a log of every Durable Object's storage for 30 days and can put it
+back exactly as it was at any moment in that window (point-in-time recovery). There
+is no dashboard button; the door is `worker/restore.ts`, dormant. To use it, route
+`/admin/restore` to `handleRestore` in `index.ts`, deploy, then:
+
+```bash
+# stage a restore to just before it went wrong (UTC); the reply carries an "undo" bookmark
+curl -s -X POST -H "authorization: Bearer $KEY" -d '{"to":"2026-10-19T08:50:00Z"}' $HUB/admin/restore
+# restart the object so it takes effect
+curl -s -X POST -H "authorization: Bearer $KEY" -d '{"restart":true}' $HUB/admin/restore
+node bin/todo.mjs stats        # is it back? if not, restore to another time, or to the undo bookmark
+```
+
+then take the route out and deploy again. It cannot be tried locally (the API does
+not exist in `wrangler dev`), which is why it stays written and dormant rather than
+rebuilt in a hurry. Devices also hold full copies and re-merge into an emptied hub
+when opened, so a restore never loses what was typed since.
+
 Proving it:
 
 ```bash

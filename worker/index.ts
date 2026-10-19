@@ -32,8 +32,22 @@ import { isConfigured } from './ai';
 
 export type { Env };
 
-/** Keys this file keeps in the Durable Object's storage, clear of TinyBase's. */
-const USED_PREFIX = 'ai/used/';
+/**
+ * Everything this file stores lives in a SQL table, never in key-value storage.
+ *
+ * That is not a style choice. TinyBase's persister loads the vault by listing
+ * *every* key-value entry in the object's storage and reading each as one of its
+ * own. A counter written there — a bare number — cannot be read as one, so the
+ * load fails, quietly; the vault comes back empty; and the next save writes that
+ * emptiness over everything. It happened: one restart after the first day's
+ * budget was spent, the hub held no tasks. A SQL table is invisible to that
+ * listing, which is the whole of the fix, and `test:ai` now restarts the hub with
+ * a spent budget and checks the vault is still there.
+ */
+const SQL_USAGE = 'CREATE TABLE IF NOT EXISTS ai_usage (day TEXT PRIMARY KEY, used INTEGER NOT NULL)';
+
+/** What an earlier version wrote into key-value storage, and must be cleared before the vault loads. */
+const LEGACY_KV_PREFIX = 'ai/';
 
 export class TodoSync extends WsServerDurableObject<Env> {
   /**
@@ -57,7 +71,13 @@ export class TodoSync extends WsServerDurableObject<Env> {
    * The store is also a *peer*: TinyBase wires it into the same synchronizer
    * the sockets use, so a row written to it here reaches every device.
    */
-  createPersister() {
+  async createPersister() {
+    // An earlier version kept the day's counter as a key-value entry, which the
+    // vault's own loader cannot read (see SQL_USAGE). Any left behind are
+    // removed *before* the load, or the load would fail on them once more.
+    const legacy = [...(await this.ctx.storage.list({ prefix: LEGACY_KV_PREFIX })).keys()];
+    if (legacy.length) await this.ctx.storage.delete(legacy);
+
     const store = createMergeableStore();
     this.store = store;
     return createDurableObjectStoragePersister(store, this.ctx.storage);
@@ -73,22 +93,50 @@ export class TodoSync extends WsServerDurableObject<Env> {
    * not in the Worker, where it would race.
    */
   async reserve(day: string, cap: number): Promise<{ ok: boolean; used: number }> {
-    const key = `${USED_PREFIX}${day}`;
-    const used = (await this.ctx.storage.get<number>(key)) ?? 0;
+    const sql = this.ctx.storage.sql;
+    sql.exec(SQL_USAGE);
+
+    const row = sql.exec<{ used: number }>('SELECT used FROM ai_usage WHERE day = ?', day).toArray()[0];
+    const used = row ? Number(row.used) : 0;
     if (used >= cap) return { ok: false, used };
 
     // A new day: yesterday's counter has nothing left to say.
-    if (used === 0) {
-      const stale = [...(await this.ctx.storage.list({ prefix: USED_PREFIX })).keys()]
-        .filter((k) => k !== key);
-      if (stale.length) await this.ctx.storage.delete(stale);
-    }
-    await this.ctx.storage.put(key, used + 1);
+    if (!row) sql.exec('DELETE FROM ai_usage WHERE day != ?', day);
+
+    sql.exec(
+      'INSERT INTO ai_usage (day, used) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET used = excluded.used',
+      day, used + 1,
+    );
     return { ok: true, used: used + 1 };
   }
 
+  // ── Recovery (see restore.ts) ──────────────────────────────────────────────
+  // Dormant: nothing routes here. Re-adding the route in index.ts, for as long as it
+  // takes, is how a vault is put back.
+
+  async restoreTo(iso: string): Promise<{ bookmark: string; undo: string; now: string }> {
+    const when = new Date(iso);
+    if (Number.isNaN(when.getTime())) throw new Error('not a time');
+    const now = await this.ctx.storage.getCurrentBookmark();
+    const bookmark = await this.ctx.storage.getBookmarkForTime(when);
+    const undo = await this.ctx.storage.onNextSessionRestoreBookmark(bookmark);
+    return { bookmark, undo, now };
+  }
+
+  async restoreBookmark(bookmark: string): Promise<{ bookmark: string; undo: string }> {
+    const undo = await this.ctx.storage.onNextSessionRestoreBookmark(bookmark);
+    return { bookmark, undo };
+  }
+
+  restartNow(): void {
+    this.ctx.abort('restore');
+  }
+
   async usedOn(day: string): Promise<number> {
-    return (await this.ctx.storage.get<number>(`${USED_PREFIX}${day}`)) ?? 0;
+    const sql = this.ctx.storage.sql;
+    sql.exec(SQL_USAGE);
+    const row = sql.exec<{ used: number }>('SELECT used FROM ai_usage WHERE day = ?', day).toArray()[0];
+    return row ? Number(row.used) : 0;
   }
 
   // ── The morning brief ──────────────────────────────────────────────────────
@@ -137,6 +185,7 @@ export default {
 
     // Claude's doors. These *can* carry the key in a header, so they do.
     if (parts[0] === 'ai') return handleAi(request, env, parts);
+
 
     if (parts[0] !== 'sync') {
       // Everything else is the app itself.

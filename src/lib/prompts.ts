@@ -47,7 +47,7 @@ export const TASK_RULES = `Task rules:
   Any OTHER tag names the module. For the OERP project use exactly these spellings: email, project-hub, hris, meet-chat, team-evaluation, shared-ui, property-booking, notification, portal.
   Work spanning the whole project takes no module tag.
 - notes: one or two lines, under ~120 characters. Distil the point; never transcribe the input. Say what is wrong and what it should be. null if the title already says everything.
-- due: only when a time is actually implied. Time-of-day words (shokal, bikel, rat) are not dates — mention them in notes if they matter.
+- due: only when a time is actually implied, as YYYY-MM-DD from today's date. kal/kalke/tomorrow is tomorrow; porshu is two days on; "ei week"/this week is that week's Friday; "agami week"/next week is seven days on; "shomne mash"/next month is the same day next month; a weekday name is the next such day. Time-of-day words (shokal, bikel, rat) are not dates — mention them in notes if they matter.
 - priority: 0 joruri/urgent/ekhoni, 1 important/guruttopurno/must, 2 default, 3 pore holeo hobe/whenever.`;
 
 export const NOTE_RULES = `Note rules:

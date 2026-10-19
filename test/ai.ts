@@ -439,6 +439,76 @@ try {
   rmSync(persist2, { recursive: true, force: true });
 }
 
+// ── The vault survives the hub restarting ────────────────────────────────────
+//
+// The test that was missing, and the one that matters most. A Durable Object is
+// restarted by every deploy, every secret change and every idle eviction, and each
+// time it loads the vault back from storage. The daily budget counter lives in
+// that same storage. If loading cannot read it, the vault comes back EMPTY — and
+// the next save writes that emptiness over everything.
+
+try {
+  const persist3 = mkdtempSync(join(tmpdir(), 'vault-ai-test3-'));
+  let hub3 = startHub(persist3);
+  hub3.stdout?.on('data', (d) => (hubLog += d));
+  hub3.stderr?.on('data', (d) => (hubLog += d));
+  await waitForHub();
+
+  const first = await connect('first');
+  first.store.setRow('tasks', 'keep1', {
+    title: 'must survive a restart', status: 'todo', priority: 2, order: 1,
+    createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', source: 'cli', tags: '[]', subtasks: '[]',
+  });
+  first.store.setRow('notes', 'keepn', {
+    kind: 'code', title: 'a note too', secret: 'enc.v1:xxxx.yyyy', body: '',
+    createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', order: 1,
+  });
+  await wait(1200);
+
+  // Spend a unit of the day's budget — this is what writes the counter.
+  await call('normalise', { text: 'spend one unit', ...ctx });
+  const spent = (await (await call('status', undefined, KEY, 'GET')).json() as any).used;
+  check('the budget counter was written before the restart', spent >= 1, String(spent));
+
+  await first.stop();
+  hub3.kill();
+  await wait(2500);
+
+  hub3 = startHub(persist3);          // same storage, a new process: a restart
+  hub3.stdout?.on('data', (d) => (hubLog += d));
+  hub3.stderr?.on('data', (d) => (hubLog += d));
+  await waitForHub();
+
+  const second = await connect('second');
+  await wait(1500);
+  check('a restart with the budget counter in storage does not lose a task',
+    second.store.hasRow('tasks', 'keep1'), `tasks after restart: ${second.store.getRowIds('tasks').length}`);
+  check('…nor a note', second.store.hasRow('notes', 'keepn'));
+
+  // …and the vault must survive the *next* save too, which is the one that would
+  // have written the emptiness over it.
+  second.store.setCell('tasks', 'keep1', 'title', 'still here after a second change');
+  await wait(1200);
+  await second.stop();
+  hub3.kill();
+  await wait(2500);
+  hub3 = startHub(persist3);
+  hub3.stdout?.on('data', (d) => (hubLog += d));
+  await waitForHub();
+  const third = await connect('third');
+  await wait(1500);
+  check('…and after a second restart, with the change that came between',
+    third.store.getCell('tasks', 'keep1', 'title') === 'still here after a second change');
+  check('the budget carries across restarts (it is a counter, not a reset)',
+    ((await (await call('status', undefined, KEY, 'GET')).json() as any).used) >= 1);
+  await third.stop();
+  hub3.kill();
+  await wait(800);
+  rmSync(persist3, { recursive: true, force: true });
+} catch (err) {
+  failure ??= err;
+}
+
 // ── Report ───────────────────────────────────────────────────────────────────
 
 let failed = 0;

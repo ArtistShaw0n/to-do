@@ -24,7 +24,8 @@
     "test:bugs": "vite build --config vite.test.config.ts --mode bugs && node .test-out/bugs.mjs",
     "check:design": "node scripts/check-design-system.mjs",
     "test:lock": "vite build --config vite.test.config.ts --mode lock && node .test-out/lock.mjs",
-    "test:ai": "vite build --config vite.test.config.ts --mode ai && node .test-out/ai.mjs"
+    "test:ai": "vite build --config vite.test.config.ts --mode ai && node .test-out/ai.mjs",
+    "test:writes": "vite build --config vite.test.config.ts --mode writes && node .test-out/writes.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

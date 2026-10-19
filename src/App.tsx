@@ -62,16 +62,17 @@ export default function App() {
   const brief = vault ? briefFor(vault) : null;
 
   /**
-   * Whether the hub can think. Asked once the hub is reachable and again each
-   * time the window comes back to the front — a day's ceiling or a newly added
-   * key can change while the app sits in the menu bar.
+   * Whether the hub can think. Asked once the hub is reachable and again when the
+   * window comes back to the front, at most every ten minutes — a day's ceiling or
+   * a newly added key can change while the app sits in the menu bar, but asking
+   * wakes the hub's Durable Object, so it is not asked on every switch of window.
    */
   const ai = useAiStatus();
   const aiOn = !!ai?.configured && ai.used < ai.cap;
   useEffect(() => {
     if (sync !== 'online') return;
     void refreshAiStatus();
-    const again = () => { if (document.visibilityState === 'visible') void refreshAiStatus(); };
+    const again = () => { if (document.visibilityState === 'visible') void refreshAiStatus(10 * 60_000); };
     document.addEventListener('visibilitychange', again);
     return () => document.removeEventListener('visibilitychange', again);
   }, [sync]);

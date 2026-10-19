@@ -29,6 +29,7 @@ import { handleAi, dailyCap } from './aiRoutes';
 import { writeBrief, type BriefResult } from './brief';
 import { dayIn, safeZone } from './day';
 import { isConfigured } from './ai';
+import { skipUnchangedWrites } from './storage';
 
 export type { Env };
 
@@ -70,6 +71,10 @@ export class TodoSync extends WsServerDurableObject<Env> {
    *
    * The store is also a *peer*: TinyBase wires it into the same synchronizer
    * the sockets use, so a row written to it here reaches every device.
+   *
+   * The storage is wrapped (see `storage.ts`) because TinyBase saves the whole
+   * vault back each time the object wakes, and the free plan allows 100,000 rows
+   * written a day: about 120 wakes. That is how the hub was blocked on 2026-10-19.
    */
   async createPersister() {
     // An earlier version kept the day's counter as a key-value entry, which the
@@ -80,7 +85,7 @@ export class TodoSync extends WsServerDurableObject<Env> {
 
     const store = createMergeableStore();
     this.store = store;
-    return createDurableObjectStoragePersister(store, this.ctx.storage);
+    return createDurableObjectStoragePersister(store, skipUnchangedWrites(this.ctx.storage));
   }
 
   // ── The day's AI budget ────────────────────────────────────────────────────

@@ -115,7 +115,19 @@ function markCapped() {
   if (status) setStatus({ ...status, used: status.cap });
 }
 
-export async function refreshAiStatus(): Promise<AiStatus | null> {
+let askedAt = 0;
+
+/**
+ * Ask the hub whether Claude is available.
+ *
+ * `maxAgeMs` lets a caller that fires often — the window coming back to the front —
+ * settle for an answer that is recent enough. The question is not free: it reaches
+ * the Durable Object, and a hub that is asked it on every switch of window spends
+ * its day waking up.
+ */
+export async function refreshAiStatus(maxAgeMs = 0): Promise<AiStatus | null> {
+  if (maxAgeMs && status && Date.now() - askedAt < maxAgeMs) return status;
+  askedAt = Date.now();
   try {
     setStatus(await request<AiStatus>('status', { method: 'GET', timeoutMs: 8_000 }));
   } catch {

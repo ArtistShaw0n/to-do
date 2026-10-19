@@ -489,6 +489,29 @@ hub stores for itself goes in a SQL table (`ctx.storage.sql`), which that listin
 cannot see. `test:ai` restarts a hub with a spent budget and checks the vault is
 still there; do not remove it.
 
+**Waking the Durable Object must cost no writes.** TinyBase's server saves the *whole*
+vault back every time the object wakes (`startAutoSave` begins with a full `save()`,
+and every cell is a key of its own). The object sleeps after a few idle seconds, and
+anything that reaches it wakes it: a device coming to the front, an `/ai/status`
+question, an AI call, the cron, a deploy. The free plan allows **100,000 rows written
+a day**; the vault is ~800 entries, so ~120 wakes use the whole day. On 2026-10-19 they
+did, and Cloudflare refused every request that reaches the object until 00:00 UTC —
+no sync and no AI, on every device. `worker/storage.ts` wraps the persister's storage
+so a write of what is already stored is dropped (reads are cheap, writes run out), and
+`pnpm test:writes` holds that as named promises. Do not remove it, and do not make
+anything wake the object on a timer or on every focus (the app asks `/ai/status` at
+most every ten minutes for that reason).
+
+*Telling it from an outage:* `/health` answers 200 (the Worker is fine), but whatever
+reaches the object — `/ai/status`, a WebSocket to `/sync/…` — is a Cloudflare 500
+page, and the CLI says "could not reach the sync hub" and falls back to the local
+file. Cloudflare also emails. Devices keep working on their own copies and re-merge
+after the reset, so nothing typed is lost; but **do not add tasks through the CLI
+meanwhile** — they would land in the local file, which the hub never reads back.
+It clears at 00:00 UTC (06:00 in Dhaka), or at once on the Workers Paid plan
+($5/month), which has no such cap. Check what is using the quota in the dashboard:
+Workers & Pages → Durable Objects → Metrics → rows written.
+
 **If the vault is ever empty or wrong: do not panic, and do not re-enter anything.**
 Cloudflare keeps a log of every Durable Object's storage for 30 days and can put it
 back exactly as it was at any moment in that window (point-in-time recovery). There
@@ -512,6 +535,7 @@ Proving it:
 
 ```bash
 pnpm test:ai                  # a real Worker + Durable Object against a stand-in for the API
+pnpm test:writes              # TinyBase's persister vs counting storage: a wake rewrites nothing
 node scripts/ai-smoke.mjs     # one real call per door, printed for a person to read
 node scripts/ai-eval.mjs      # his own history fed back through, to see if it lands where Claude Code did
 ```
@@ -532,6 +556,7 @@ two are for.
 | `scripts/check-design-system.mjs` | the gate that keeps them honest |
 | `worker/index.ts` | the hub: routing, the Durable Object, the day's budget, the cron |
 | `worker/aiRoutes.ts`, `worker/ai.ts`, `worker/brief.ts` | Claude's doors, the one place that calls it, the morning brief |
+| `worker/storage.ts` | the persister's storage, wrapped so a wake does not rewrite the vault (see *Waking the Durable Object…*) |
 | `src/lib/prompts.ts`, `worker/prompts.ts` | what Claude is told |
 | `src/lib/ai.ts` | the app's side: knocks on the hub, knows whether it is switched on |
 | `src-tauri/src/lib.rs` | storage, watcher, tray, hotkey |

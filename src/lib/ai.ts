@@ -214,8 +214,8 @@ export async function aiBrief(force: boolean): Promise<{ status: string; reason?
 
 /** Longest side the model reads at full detail; larger pictures are shrunk to it anyway. */
 const MAX_SIDE = 1568;
-/** The hub refuses more than this, base64 included. */
-const MAX_BASE64 = 3_800_000;
+/** The hub refuses more than 1.6 MB of base64; stay under it. */
+const MAX_BASE64 = 1_500_000;
 
 /**
  * A picture, small enough to send.

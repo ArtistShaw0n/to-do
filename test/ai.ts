@@ -242,6 +242,12 @@ try {
     JSON.stringify(seen[0]?.body?.output_config?.format?.schema).includes('"note"') === false);
   check('an unsupported image type is refused',
     (await call('image', { image: { media_type: 'image/bmp', data: png }, ...ctx })).status === 400);
+  const big = 'A'.repeat(1_700_000);
+  const tooBig = await call('image', { image: { media_type: 'image/png', data: big }, ...ctx });
+  check('a picture over the CPU-safe ceiling is refused before it is parsed (413)',
+    tooBig.status === 413, String(tooBig.status));
+  const justOver = await call('image', { image: { media_type: 'image/png', data: 'A'.repeat(1_650_000).slice(0, 1_650_000) }, ...ctx });
+  check('…and one just over the data ceiling is refused too', [400, 413].includes(justOver.status), String(justOver.status));
   check('non-base64 data is refused',
     (await call('image', { image: { media_type: 'image/png', data: '<script>' }, ...ctx })).status === 400);
 

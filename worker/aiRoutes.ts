@@ -245,14 +245,27 @@ async function steps(request: Request, env: Env, today: string, cap: number) {
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const;
 type ImageType = (typeof IMAGE_TYPES)[number];
 
+/**
+ * The most base64 a picture may carry, and why it is not larger.
+ *
+ * A Worker on the free plan gets 10 ms of CPU per request, and handling a
+ * picture is mostly copying it: parse it, then serialise it again for the API.
+ * Measured, that is ~9 ms at 4 MB — a whisker under the limit, which is not a
+ * margin — and ~1.3 ms at the 600 KB a screenshot shrunk to 1568 px actually
+ * weighs. The app shrinks before it sends, so this only ever refuses something
+ * the app would not have sent; it refuses it clearly instead of letting the
+ * platform kill the request with an error nobody can read.
+ */
+const MAX_IMAGE_BASE64 = 1_600_000;
+
 async function image(request: Request, env: Env, today: string, cap: number) {
-  const body = await readBody(request, 4_200_000);
+  const body = await readBody(request, MAX_IMAGE_BASE64 + 100_000);
   const img = body.image;
   if (!isObject(img)) throw new Bad('image is required');
   const mediaType = img.media_type as ImageType;
   if (!IMAGE_TYPES.includes(mediaType)) throw new Bad('image.media_type must be jpeg, png, webp or gif');
   const data = typeof img.data === 'string' ? img.data : '';
-  if (!data || data.length > 4_000_000) throw new Bad('image.data is missing or larger than 4 MB');
+  if (!data || data.length > MAX_IMAGE_BASE64) throw new Bad('image.data is missing or larger than 1.6 MB');
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(data.slice(0, 4096))) throw new Bad('image.data is not base64');
 
   const ctx = {

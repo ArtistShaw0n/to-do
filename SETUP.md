@@ -69,11 +69,13 @@ usage will not draw from it. Then, in your own terminal (never in a chat, never 
 npx wrangler secret put ANTHROPIC_API_KEY
 ```
 
-Paste the key when it asks. Open the app: the buttons appear on their own. To
+Paste the key when it asks. **Nothing appears on screen as you paste — that is
+normal, the value is hidden. Press Enter.** Open the app: the buttons appear on
+their own. To
 see what the model does with your own phrasing before trusting it with your list:
 
 ```bash
-node scripts/ai-smoke.mjs     # one real call per feature
+node scripts/ai-smoke.mjs     # checks the key first, then one real call per feature
 node scripts/ai-eval.mjs      # your own past tasks, fed back through
 ```
 

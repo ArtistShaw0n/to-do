@@ -15,7 +15,7 @@
 import type { Env } from './env';
 import type { TodoSync } from './index';
 import { secretsMatch } from './secret';
-import { AiError, complete, DEFAULT_MODEL, isConfigured, parseJson, type AiFailure } from './ai';
+import { AiError, checkKey, complete, DEFAULT_MODEL, isConfigured, parseJson, type AiFailure } from './ai';
 import { dayIn, safeZone } from './day';
 import {
   ASK_SYSTEM, IMAGE_SCHEMA, IMAGE_SYSTEM, STEPS_SCHEMA, STEPS_SYSTEM,
@@ -158,6 +158,9 @@ export async function handleAi(request: Request, env: Env, parts: string[]): Pro
       timezone: tz,
     });
   }
+
+  // Does the key actually work? Free: it asks the API whether the model exists.
+  if (route === 'check' && request.method === 'GET') return json(await checkKey(env));
 
   if (request.method !== 'POST') return json({ error: 'not_found' }, 404);
 

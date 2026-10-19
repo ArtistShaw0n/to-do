@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMergeableStore, type MergeableStore } from 'tinybase';
 import { createWsSynchronizer } from 'tinybase/synchronizers/synchronizer-ws-client';
+import { checkKey } from '../worker/ai';
 
 const HUB_PORT = 8791;
 const MOCK_PORT = 8792;
@@ -86,6 +87,23 @@ function startMock(): Promise<Server> {
       req.on('end', () => {
         const body = raw ? JSON.parse(raw) : {};
         seen.push({ path: req.url ?? '', headers: req.headers, body });
+
+        // GET /v1/models/<id> — what `checkKey` asks. Which answer depends on
+        // the key and the model name, so each way a key can fail is reachable.
+        if (req.method === 'GET' && req.url?.startsWith('/v1/models/')) {
+          const model = decodeURIComponent(req.url.slice('/v1/models/'.length).split('?')[0]);
+          const key = String(req.headers['x-api-key'] ?? '');
+          const fail = (status: number, type: string) => {
+            res.writeHead(status, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ type: 'error', error: { type, message: 'SECRET-MESSAGE-THAT-MUST-NOT-LEAK' } }));
+          };
+          if (key === 'sk-ant-bad') return fail(401, 'authentication_error');
+          if (key === 'sk-ant-forbidden') return fail(403, 'permission_error');
+          if (model === 'claude-not-a-model') return fail(404, 'not_found_error');
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ id: model, type: 'model', display_name: 'Mock', created_at: '2026-01-01T00:00:00Z' }));
+        }
+
         const { status, json } = reply(body);
         res.writeHead(status, { 'content-type': 'application/json' });
         res.end(JSON.stringify(json));
@@ -167,6 +185,29 @@ try {
   check('status carries the ceiling', status.cap === CAP && status.used === 0);
   check('a response from the hub is readable cross-origin',
     (await call('status', undefined, KEY, 'GET')).headers.get('access-control-allow-origin') === '*');
+
+  // ── Is the key any good? ───────────────────────────────────────────────────
+  check('the key check needs the sync key too', (await call('check', undefined, null, 'GET')).status === 403);
+  const good = await (await call('check', undefined, KEY, 'GET')).json() as any;
+  check('a working key is reported as accepted, with the model available',
+    good.configured === true && good.key === 'accepted' && good.model === 'available', JSON.stringify(good));
+  check('the check asks the API for the configured model, not a hard-coded one',
+    seen.some((r) => r.path.startsWith('/v1/models/claude-opus-5-5')));
+
+  const env = (key: string | undefined, model = 'claude-opus-5-5') =>
+    ({ ANTHROPIC_API_KEY: key, ANTHROPIC_BASE_URL: `http://127.0.0.1:${MOCK_PORT}`, AI_MODEL: model });
+  const bad = await checkKey(env('sk-ant-bad'));
+  check('a rejected key says so, with the status and the type',
+    bad.key === 'rejected' && bad.status === 401 && bad.type === 'authentication_error', JSON.stringify(bad));
+  const forbidden = await checkKey(env('sk-ant-forbidden'));
+  check('a key that is refused permission is "rejected" too, and says 403',
+    forbidden.key === 'rejected' && forbidden.status === 403, JSON.stringify(forbidden));
+  const noModel = await checkKey(env('sk-ant-fine', 'claude-not-a-model'));
+  check('a good key that cannot see the model says the model is the problem',
+    noModel.key === 'accepted' && noModel.model === 'unavailable' && noModel.status === 404, JSON.stringify(noModel));
+  check('no key at all is "not configured", nothing more', JSON.stringify(await checkKey(env(undefined))) === '{"configured":false}');
+  check('the API\'s own message never comes back — only a status and a type',
+    !JSON.stringify([bad, forbidden, noModel]).includes('SECRET-MESSAGE'));
 
   // ── Turning a line into a task ─────────────────────────────────────────────
   seen.length = 0;

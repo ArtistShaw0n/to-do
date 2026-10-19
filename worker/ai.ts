@@ -48,7 +48,14 @@ export interface Ask {
   schema?: Record<string, unknown>;
 }
 
+/** Anthropic's own name for what went wrong ("authentication_error", …). Never its message. */
+const errorType = (err: InstanceType<typeof Anthropic.APIError>): string | undefined =>
+  (err.error as { error?: { type?: string } } | undefined)?.error?.type;
+
 function classify(err: unknown): AiError {
+  // For whoever reads the logs: the status and the type, which say *why* without
+  // quoting anything that was sent. The message is left out on purpose.
+  if (err instanceof Anthropic.APIError) console.error(`[ai] the API answered ${err.status} ${errorType(err) ?? ''}`.trim());
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
     return new AiError('auth', 'the hub\'s API key was rejected');
   }
@@ -119,5 +126,55 @@ export function parseJson<T>(text: string): T {
     return JSON.parse(text) as T;
   } catch {
     throw new AiError('upstream', 'the answer was not valid JSON');
+  }
+}
+
+// ── Is the key any good? ─────────────────────────────────────────────────────
+
+export interface KeyCheck {
+  configured: boolean;
+  /** What the API made of the key itself. */
+  key?: 'accepted' | 'rejected' | 'unreachable';
+  /** Whether the configured model can be used with it. */
+  model?: 'available' | 'unavailable';
+  status?: number;
+  /** Anthropic's error *type*, never its message. */
+  type?: string;
+}
+
+/**
+ * Ask the API one free question — "does this model exist, for me?" — to find out
+ * whether the key works, without spending a token.
+ *
+ * A key can be present and still useless: pasted wrong, made in a different
+ * organisation, expired. From outside all of those look the same — every feature
+ * quietly answers "auth" — and the only person who can tell them apart is the one
+ * holding the Console. This says which it is, as a status and a type, so setup
+ * is a conversation and not a guess.
+ */
+export async function checkKey(env: AiEnv): Promise<KeyCheck> {
+  if (!isConfigured(env)) return { configured: false };
+
+  const client = new Anthropic({
+    apiKey: env.ANTHROPIC_API_KEY,
+    baseURL: env.ANTHROPIC_BASE_URL || undefined,
+    maxRetries: 0,
+    timeout: 15_000,
+  });
+
+  try {
+    await client.models.retrieve(env.AI_MODEL?.trim() || DEFAULT_MODEL);
+    return { configured: true, key: 'accepted', model: 'available' };
+  } catch (err) {
+    if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
+      return { configured: true, key: 'rejected', status: err.status, type: errorType(err) };
+    }
+    if (err instanceof Anthropic.NotFoundError) {
+      return { configured: true, key: 'accepted', model: 'unavailable', status: err.status, type: errorType(err) };
+    }
+    if (err instanceof Anthropic.APIError) {
+      return { configured: true, status: err.status, type: errorType(err) };
+    }
+    return { configured: true, key: 'unreachable' };
   }
 }

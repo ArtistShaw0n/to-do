@@ -431,6 +431,15 @@ npx wrangler secret put ANTHROPIC_API_KEY
 Without it the hub syncs exactly as before and every AI feature switches itself
 off: `GET /ai/status` says `configured: false` and the app hides the buttons.
 
+**"Configured" is not "working".** `/ai/status` only says a key is *present*; a key
+pasted wrong is present too, and every feature then answers `auth` with nothing to
+say why. `GET /ai/check` is the one that asks the API: `rejected` + `401
+authentication_error` means the value is not a valid key (mistyped, truncated, or
+not a key at all); `rejected` + `403` means a real key that may not do this;
+`accepted` + `model: unavailable` means a good key from an organisation that cannot
+use the configured model. `scripts/ai-smoke.mjs` runs it first and stops with a
+sentence instead of eleven identical failures.
+
 | Door | What it does |
 |---|---|
 | `POST /ai/normalise` | a typed line → tasks (and notes), as the same JSON `claude -p` returns, so `parseItems` reads both |
@@ -439,6 +448,7 @@ off: `GET /ai/status` says `configured: false` and the app hides the buttons.
 | `POST /ai/ask` | a question about the list, answered in his register |
 | `POST /ai/brief` | write today's brief now (the 06:30 cron does the same) |
 | `GET /ai/status` | configured? which model, today's calls against the ceiling |
+| `GET /ai/check` | does the API *accept* the key, and can it see the model? Free (asks whether the model exists). Answers with a status and Anthropic's error *type* only — never its message |
 
 Auth is the sync key as `Authorization: Bearer …` (a `fetch` can set a header; a
 browser WebSocket cannot). The rules that are not negotiable:

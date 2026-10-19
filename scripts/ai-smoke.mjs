@@ -75,6 +75,31 @@ if (!status.json.configured) {
   process.exit(1);
 }
 
+// ── 0b. Does the API accept the key? ─────────────────────────────────────────
+//
+// Free: it asks whether the model exists. A key that was pasted wrong, or made in
+// another organisation, would otherwise fail every call below the same way.
+
+const verdict = await call('check');
+const v = verdict.json;
+if (v.key === 'rejected') {
+  console.log(`\n${red('The API does not accept this key')} (${v.status} ${v.type ?? ''}).`);
+  console.log('It is set on the hub, but Anthropic refuses it — almost always a key that was pasted wrong, was not');
+  console.log('copied whole, or is not a key at all. Make a new one at platform.claude.com/settings/keys and set it again:');
+  console.log('\n    npx wrangler secret put ANTHROPIC_API_KEY\n');
+  process.exit(1);
+}
+if (v.model === 'unavailable') {
+  console.log(`\n${red(`The key works, but not for ${status.json.model}`)} (${v.status}).`);
+  console.log('That organisation cannot use this model. Change AI_MODEL in wrangler.toml, or use a key from the right one.\n');
+  process.exit(1);
+}
+if (v.key !== 'accepted') {
+  console.log(`\n${red('Could not reach the API to check the key')} (${v.status ?? 'no answer'} ${v.type ?? ''}). Try again in a minute.\n`);
+  process.exit(1);
+}
+console.log(`  ${green('✓')} the API accepts the key, and ${status.json.model} is available to it`);
+
 // ── 1. Typed lines ───────────────────────────────────────────────────────────
 
 section('1. Typed lines → tasks',

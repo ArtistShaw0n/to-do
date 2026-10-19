@@ -359,6 +359,36 @@ export function parseItems(text: string, raw: string, fallback: Draft): Item[] {
   return items;
 }
 
+/**
+ * What came back for a picture: the tasks in it, and the one sentence saying what
+ * it was.
+ *
+ * A picture with no work in it is an answer, not an error. `parseItems` calls an
+ * empty list a failure, which is right for a typed line and wrong here — so that
+ * one case becomes an empty list, with `seen` to explain it. Anything else that
+ * is wrong with the reply (no JSON at all) still throws.
+ */
+export function parsePicture(text: string, fallback: Draft): { items: TaskDraft[]; seen?: string } {
+  let items: TaskDraft[] = [];
+  try {
+    items = parseItems(text, '', fallback).filter((i): i is TaskDraft => i.type === 'task');
+  } catch (err) {
+    if (!(err instanceof Error && /no usable item/.test(err.message))) throw err;
+  }
+  return { items, seen: seenIn(text) };
+}
+
+/** The `seen` sentence, if there is one — on one line, and short enough to show. */
+function seenIn(text: string): string | undefined {
+  try {
+    const parsed = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { seen?: unknown };
+    const seen = typeof parsed.seen === 'string' ? parsed.seen.replace(/\s+/g, ' ').trim() : '';
+    return seen ? seen.slice(0, 240) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Folding the reply back into the vault ────────────────────────────────────
 
 /** The category the composer was open on. A model guess never overrules it. */

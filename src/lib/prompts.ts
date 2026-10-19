@@ -124,11 +124,22 @@ export const NORMALISE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-/** A screenshot: tasks only. A password in a picture is not a note to keep. */
+/**
+ * A screenshot: tasks only. A password in a picture is not a note to keep.
+ *
+ * `seen` comes first, and is why a picture with no work in it is no longer a dead
+ * end: one sentence on what the picture *is*, written before the items, so an
+ * empty answer can say "it was a dialog, not a list" and be told apart from a
+ * picture that was never read. Writing it first also makes the model look before
+ * it extracts.
+ */
 export const IMAGE_SCHEMA = {
   type: 'object',
-  properties: { items: { type: 'array', items: TASK_ITEM_SCHEMA } },
-  required: ['items'],
+  properties: {
+    seen: { type: 'string' },
+    items: { type: 'array', items: TASK_ITEM_SCHEMA },
+  },
+  required: ['seen', 'items'],
   additionalProperties: false,
 } as const;
 

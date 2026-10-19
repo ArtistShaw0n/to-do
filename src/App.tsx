@@ -8,7 +8,7 @@ import {
 } from './lib/vault';
 import {
   applyItems, buildPrompt, looksLikeSecret, noteFields, noteLocally, normaliseLocally,
-  parseItems, taskFields,
+  parseItems, parsePicture, taskFields,
   type NoteDraft, type TaskDraft, type ViewContext,
 } from './lib/normalise';
 import { useVault } from './lib/useVault';
@@ -101,7 +101,7 @@ export default function App() {
    * the review is accepted.
    */
   const [reading, setReading] = useState<string | null>(null);
-  const [picture, setPicture] = useState<{ items: TaskDraft[] } | null>(null);
+  const [picture, setPicture] = useState<{ items: TaskDraft[]; seen?: string; hint?: string } | null>(null);
 
   /** Today's brief, rewritten on request. It arrives through sync like any row. */
   const [refreshingBrief, setRefreshingBrief] = useState(false);
@@ -439,24 +439,19 @@ export default function App() {
     ...(view === 'bugs' ? { tags: ['bug'] } : {}),
   });
 
-  const readPicture = async (file: Blob) => {
+  const readPicture = async (file: Blob, hint?: string) => {
     if (!vault) return;
     setReading('Reading the picture…');
     try {
       const image = await prepareImage(file);
-      const text = await aiImage(image, vault);
+      const text = await aiImage(image, vault, hint);
 
       // A picture with nothing in it is a valid answer, not a failure: the
-      // reviewer says so, instead of an error that sounds like something broke.
-      let items: TaskDraft[] = [];
-      try {
-        items = parseItems(text, '', normaliseLocally('', vault))
-          .filter((i): i is TaskDraft => i.type === 'task');
-      } catch (err) {
-        if (!(err instanceof Error && /no usable item/.test(err.message))) throw err;
-      }
+      // reviewer says so — and says what the picture was — instead of an error
+      // that sounds like something broke.
+      const { items, seen } = parsePicture(text, normaliseLocally('', vault));
       setReading(null);
-      setPicture({ items });
+      setPicture({ items, seen, hint });
     } catch (err) {
       setReading(describeAiError(err));
       setTimeout(() => setReading(null), 6000);
@@ -584,6 +579,8 @@ export default function App() {
     return (
       <PictureReview
         items={picture.items}
+        seen={picture.seen}
+        hint={picture.hint}
         onAdd={addFromPicture}
         onCancel={() => setPicture(null)}
       />
@@ -849,7 +846,7 @@ export default function App() {
             onAdd={add}
             // Pictures become tasks, so only where tasks are typed, and only
             // when the hub can read one.
-            onImage={aiOn && view !== 'notes' ? (file) => void readPicture(file) : undefined}
+            onImage={aiOn && view !== 'notes' ? (file, hint) => void readPicture(file, hint) : undefined}
             reading={reading === 'Reading the picture…'}
           />
         )}
@@ -1050,12 +1047,23 @@ function Composer({
 }: {
   noun: string;
   onAdd: (raw: string) => void;
-  /** Present only when a picture can be turned into tasks. */
-  onImage?: (file: Blob) => void;
+  /** Present only when a picture can be turned into tasks. `hint` is what to look for in it. */
+  onImage?: (file: Blob, hint?: string) => void;
   reading?: boolean;
 }) {
   const [value, setValue] = useState('');
   const picker = useRef<HTMLInputElement>(null);
+
+  // Whatever is typed when a picture arrives says what to look for in it — "the
+  // bugs on this page" — and is spent doing so: left in the box it would be
+  // added as a task of its own. A line that states a passcode is never shown to a
+  // model, so it is not sent as a hint; the picture is read without it.
+  const handOver = (file: Blob) => {
+    const typed = value.trim();
+    const hint = typed && !looksLikeSecret(typed) ? typed.slice(0, 200) : undefined;
+    onImage?.(file, hint);
+    if (hint) setValue('');
+  };
 
   // Hands the line over verbatim. Pulling the date out here as well would mean
   // two different parsers disagreeing about the same sentence; `normaliseLocally`
@@ -1083,7 +1091,7 @@ function Composer({
           // over: ⌘⇧4, then ⌘V.
           onPaste={(e) => {
             const file = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'));
-            if (file && onImage) { e.preventDefault(); onImage(file); }
+            if (file && onImage) { e.preventDefault(); handOver(file); }
           }}
         />
         {onImage && (
@@ -1096,13 +1104,13 @@ function Composer({
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 e.target.value = ''; // so the same picture can be chosen twice
-                if (file) onImage(file);
+                if (file) handOver(file);
               }}
             />
             <button
               className="composer-send"
               aria-label="Add tasks from a picture"
-              title="Add tasks from a screenshot or photo"
+              title="Add tasks from a screenshot or photo — type what to look for first, if you like"
               disabled={reading}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => picker.current?.click()}

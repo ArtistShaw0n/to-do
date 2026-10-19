@@ -165,7 +165,9 @@ const picture = await call('image', { image: { media_type: 'image/png', data: pn
 console.log(dim(`  (${picture.ms} ms)`));
 if (!picture.ok) flag(`${picture.status} ${picture.json.error ?? ''}`);
 else {
-  const items = JSON.parse(picture.json.text).items;
+  const { seen, items } = JSON.parse(picture.json.text);
+  console.log(`  ${dim('saw :')} ${seen ?? '(no "seen" in the reply)'}`);
+  if (!seen) flag('the reply has no "seen" sentence');
   for (const it of items) {
     console.log(`  ${green('task')} ${it.title}  ${dim(`[${it.project ?? '—'} · ${it.tags.join(', ')} · P${it.priority}]`)}${it.notes ? dim(`\n       ${it.notes}`) : ''}`);
   }

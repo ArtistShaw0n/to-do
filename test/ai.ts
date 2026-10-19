@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { createMergeableStore, type MergeableStore } from 'tinybase';
 import { createWsSynchronizer } from 'tinybase/synchronizers/synchronizer-ws-client';
 import { checkKey } from '../worker/ai';
+import { parsePicture, type Draft } from '../src/lib/normalise';
 
 const HUB_PORT = 8791;
 const MOCK_PORT = 8792;
@@ -68,10 +69,12 @@ function reply(body: any): { status: number; json: unknown } {
   }
   if (schema?.properties?.items) {
     const isImage = (content ?? []).some?.((b: any) => b.type === 'image');
+    if (isImage && userText.includes('__NOTHING__')) {
+      return message(JSON.stringify({ seen: 'A settings dialog with no list or request in it.', items: [] }));
+    }
     const title = isImage ? 'Fix the row read from the picture' : `Clean: ${userText.split('Input: ')[1]?.trim() ?? '?'}`;
-    return message(JSON.stringify({
-      items: [{ type: 'task', title, project: 'OERP', tags: ['bug'], notes: null, due: null, priority: 2 }],
-    }));
+    const items = [{ type: 'task', title, project: 'OERP', tags: ['bug'], notes: null, due: null, priority: 2 }];
+    return message(JSON.stringify(isImage ? { seen: 'A bug sheet with one row.', items } : { items }));
   }
   if (String(body.system).includes('daily brief')) {
     return message('আজ **৩টা কাজ** খোলা। সবচেয়ে জরুরি — `Ship the email release`।\n\n- কিছু overdue নেই');
@@ -281,6 +284,32 @@ try {
   check('the picture is sent as an image block', blocks[0]?.type === 'image' && blocks[0]?.source?.media_type === 'image/png');
   check('a picture can only yield tasks, never notes',
     JSON.stringify(seen[0]?.body?.output_config?.format?.schema).includes('"note"') === false);
+  check('the picture reply is held to a schema that asks for `seen` first',
+    JSON.stringify(Object.keys(seen[0]?.body?.output_config?.format?.schema?.properties ?? {})) === '["seen","items"]'
+    && (seen[0]?.body?.output_config?.format?.schema?.required ?? []).includes('seen'));
+
+  // What the app does with the reply: the tasks, and the sentence that explains an empty one.
+  const fallback: Draft = { type: 'task', title: '', tags: [], priority: 2, originalInput: '' };
+  const readPic = parsePicture(img.text, fallback);
+  check('a picture reply parses to its tasks and what it saw',
+    readPic.items.length === 1 && readPic.seen === 'A bug sheet with one row.', JSON.stringify(readPic));
+
+  // Nothing in the picture is an answer, not an error — and says what it was.
+  seen.length = 0;
+  const nothingRes = await call('image', { image: { media_type: 'image/png', data: png }, ...ctx, hint: '__NOTHING__' });
+  const nothing = await nothingRes.json() as any;
+  check('a picture with no work in it is a 200, not an error', nothingRes.status === 200, String(nothingRes.status));
+  const emptyPic = parsePicture(nothing.text, fallback);
+  check('…it parses to no tasks, plus the sentence saying what it was',
+    emptyPic.items.length === 0 && emptyPic.seen === 'A settings dialog with no list or request in it.', JSON.stringify(emptyPic));
+  const textBlock = (seen[0]?.body?.messages?.[0]?.content ?? []).find((b: any) => b.type === 'text')?.text ?? '';
+  check('what the person typed travels as "what to look for"', textBlock.includes('What to look for: __NOTHING__'), textBlock);
+  check('a hint over 200 characters is refused, not silently cut',
+    (await call('image', { image: { media_type: 'image/png', data: png }, ...ctx, hint: 'x'.repeat(201) })).status === 400);
+  check('a reply with no `seen` still parses (older hub, or a stand-in)',
+    parsePicture(JSON.stringify({ items: [{ type: 'task', title: 'A', project: null, tags: [], notes: null, due: null, priority: 2 }] }), fallback).seen === undefined);
+  check('a reply that is not JSON at all is still an error, not an empty picture',
+    (() => { try { parsePicture('the picture is lovely', fallback); return false; } catch { return true; } })());
   check('an unsupported image type is refused',
     (await call('image', { image: { media_type: 'image/bmp', data: png }, ...ctx })).status === 400);
   const big = 'A'.repeat(1_700_000);

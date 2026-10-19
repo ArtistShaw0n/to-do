@@ -13,7 +13,7 @@
  *    English technical terms, idiom said the way it is said.
  */
 
-import { IMAGE_SCHEMA, STEPS_SCHEMA, REPLY_FORMAT, TASK_RULES, TASK_SHAPE } from '../src/lib/prompts';
+import { IMAGE_SCHEMA, STEPS_SCHEMA, TASK_RULES, TASK_SHAPE } from '../src/lib/prompts';
 
 export { IMAGE_SCHEMA, STEPS_SCHEMA };
 
@@ -128,9 +128,19 @@ export function stepsUser(i: StepsInput): string {
 
 // ── Tasks from a picture ─────────────────────────────────────────────────────
 
+/**
+ * A picture's reply starts with `seen`. When the list comes back empty that one
+ * sentence is all the person gets to tell "it read this and there is no work in
+ * it" from "it could not read this" — so it has to describe, not conclude.
+ */
+const IMAGE_REPLY_FORMAT = `Reply with ONE JSON object and nothing else — no prose, no markdown fence:
+{"seen": string, "items": [ ... ]}
+
+"seen" comes first: ONE plain English sentence saying what the picture is — "A bug sheet with 12 rows.", "A chat about the invoice.", "The Create API key dialog of a web console." Describe what is there; do not comment on tasks. If the picture is too small, blurred or cropped to read properly, say that in "seen". It is shown to the person when "items" is empty.`;
+
 export const IMAGE_SYSTEM = `You read a screenshot or photo and turn it into task entries. The picture might be a bug list or spreadsheet, a chat thread, a handwritten list, a design review or an email. Extract the separate pieces of work a person would need to do.
 
-${REPLY_FORMAT}
+${IMAGE_REPLY_FORMAT}
 
 Each item is a task:
 ${TASK_SHAPE}
@@ -138,7 +148,8 @@ ${TASK_SHAPE}
 How many items:
 - One task per distinct piece of work you can see. A row of a spreadsheet is one task: merge its cells into one clear title and put the rest in notes.
 - Ignore column headers, buttons, menus and the rest of the interface around the content.
-- Do not invent work the picture does not contain. If nothing in it is actionable, return {"items": []}.
+- Do not invent work the picture does not contain. A screen, dialog, settings page or document with no list, request or visible fault in it holds no work: return an empty "items" and let "seen" say what it was.
+- When the person says what to look for, that decides what counts as work. If they ask for the faults on a screen, each fault you can actually see is a task — never one you cannot see.
 - If the picture is a bug list or QA sheet — it has an issue, severity or status column — every row is a bug: tag each one \`bug\` plus its module, even when a row is worded as a request ("should show…", "should stay frozen"). A request in a bug sheet is still a report of something wrong.
 - Put a row's severity in notes as "Severity: Major" (or Minor, Blocker, Cosmetic).
 - Never copy a password, key, token or other secret out of the picture. Leave it out.

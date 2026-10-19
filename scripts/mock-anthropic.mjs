@@ -32,8 +32,13 @@ function answer(body) {
     return JSON.stringify({ steps: ['Reproduce it on the live build', 'Find the component that renders it', 'Fix and check on mobile', 'Ship in the next release'] });
   }
   if (schema?.properties?.items) {
-    if ((content ?? []).some?.((b) => b.type === 'image')) {
-      return JSON.stringify({ items: [
+    const picture = (content ?? []).find?.((b) => b.type === 'image');
+    if (picture) {
+      // A tiny picture stands in for one with no work in it, so the empty screen can be seen.
+      if ((picture.source?.data ?? '').length < 3000) {
+        return JSON.stringify({ seen: 'A settings dialog with no list or request in it (stand-in model).', items: [] });
+      }
+      return JSON.stringify({ seen: 'A bug sheet with three rows (stand-in model).', items: [
         { type: 'task', title: 'Show a preview before download in the email Drive', project: 'OERP', tags: ['bug', 'email'], notes: 'Row 1 of the screenshot', due: null, priority: 2 },
         { type: 'task', title: 'Freeze the SL column header in the booking table', project: 'OERP', tags: ['bug', 'property-booking'], notes: 'Row 2 of the screenshot', due: null, priority: 1 },
         { type: 'task', title: 'Lift the portal login box above the tablet keyboard', project: 'OERP', tags: ['bug', 'portal'], notes: null, due: null, priority: 2 },

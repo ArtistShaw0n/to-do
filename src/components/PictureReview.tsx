@@ -15,10 +15,16 @@ import type { TaskDraft } from '../lib/normalise';
  */
 export function PictureReview({
   items,
+  seen,
+  hint,
   onAdd,
   onCancel,
 }: {
   items: TaskDraft[];
+  /** One sentence on what the picture was — what makes an empty answer readable. */
+  seen?: string;
+  /** What the person asked it to look for, if they said. */
+  hint?: string;
   onAdd: (items: TaskDraft[]) => void;
   onCancel: () => void;
 }) {
@@ -48,7 +54,12 @@ export function PictureReview({
           <div className="empty">
             <div className="empty-mark">✓</div>
             <div className="empty-title">No tasks in that picture</div>
-            <div>It may be too small to read, or simply not a list of work.</div>
+            {seen && <div>Claude saw: {seen}</div>}
+            <div>
+              {hint
+                ? `Nothing in it matched “${hint}”.`
+                : 'If there is work in it, type what to look for in the box first, then add the picture again.'}
+            </div>
           </div>
         ) : (
           <div className="review-list">

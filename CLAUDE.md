@@ -444,7 +444,7 @@ sentence instead of eleven identical failures.
 |---|---|
 | `POST /ai/normalise` | a typed line → tasks (and notes), as the same JSON `claude -p` returns, so `parseItems` reads both |
 | `POST /ai/steps` | propose subtasks; shown for review, never written unreviewed |
-| `POST /ai/image` | a screenshot → tasks, **tasks only**; shown for review before anything is added |
+| `POST /ai/image` | a screenshot → tasks, **tasks only**; shown for review before anything is added. The reply is `{seen, items}`: `seen` is one sentence on what the picture *is*, so an empty `items` can say "a dialog, not a list" and be told apart from a picture that could not be read. Whatever is typed in the composer when a picture arrives goes as `hint` ("what to look for", ≤ 200 chars, never a passcode-looking line) and is cleared from the box |
 | `POST /ai/ask` | a question about the list, answered in his register |
 | `POST /ai/brief` | write today's brief now (the 06:30 cron does the same) |
 | `GET /ai/status` | configured? which model, today's calls against the ceiling |

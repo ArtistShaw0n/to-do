@@ -48,12 +48,37 @@ repo.
 ### 4. Deploy
 
 ```bash
-pnpm build
-pnpm sync:deploy
+pnpm sync:deploy        # builds first, then publishes
 ```
 
 Wrangler prints the address, something like
 `https://todo-sync.<your-subdomain>.workers.dev`. Everything below needs it.
+
+### Optional: let the hub use Claude
+
+With an Anthropic API key the hub can rewrite a task typed on a phone, read a
+screenshot, answer a question about your list, and write the morning brief — all
+without a Mac being on. Without one, none of that happens and nothing else
+changes.
+
+Create the key in the [Anthropic Console](https://console.anthropic.com/),
+**inside the organisation your API credit is attached to**, or the usage will not
+draw from it. Then, in your own terminal (never in a chat, never in the repo):
+
+```bash
+npx wrangler secret put ANTHROPIC_API_KEY
+```
+
+Paste the key when it asks. Open the app: the buttons appear on their own. To
+see what the model does with your own phrasing before trusting it with your list:
+
+```bash
+node scripts/ai-smoke.mjs     # one real call per feature
+node scripts/ai-eval.mjs      # your own past tasks, fed back through
+```
+
+The model, the daily ceiling and the timezone are three lines under `[vars]` in
+`wrangler.toml`.
 
 ### 5. Send your existing tasks up
 

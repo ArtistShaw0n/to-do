@@ -1,0 +1,408 @@
+/**
+ * Proof that the hub's Claude doors do what they claim — and refuse what they
+ * should — without spending a cent.
+ *
+ *     pnpm test:ai
+ *
+ * It starts a stand-in for the Anthropic API, then a real Worker and a real
+ * Durable Object (`wrangler dev`) pointed at it, and drives the hub the way the
+ * apps do. The stand-in records every request, so the tests can assert on what
+ * *would have been sent to Anthropic* — the model, the schema, and above all
+ * what was left out.
+ *
+ * What this cannot prove is how the real model behaves on real Banglish. That
+ * needs a key; `scripts/ai-smoke.mjs` is for the day there is one.
+ */
+
+import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createMergeableStore, type MergeableStore } from 'tinybase';
+import { createWsSynchronizer } from 'tinybase/synchronizers/synchronizer-ws-client';
+
+const HUB_PORT = 8791;
+const MOCK_PORT = 8792;
+const KEY = 'local-development-key-not-a-real-secret';
+const HUB = `http://localhost:${HUB_PORT}`;
+const CAP = 12;
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const results: [string, boolean, string?][] = [];
+const check = (name: string, ok: boolean, detail?: string) => results.push([name, ok, detail]);
+
+// ── The stand-in for api.anthropic.com ───────────────────────────────────────
+
+interface Seen { path: string; headers: IncomingMessage['headers']; body: any }
+const seen: Seen[] = [];
+
+/** What the stand-in does is decided by a marker in the user's message. */
+function reply(body: any): { status: number; json: unknown } {
+  const messages = body.messages ?? [];
+  const content = messages[0]?.content;
+  const userText = typeof content === 'string'
+    ? content
+    : (content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n');
+  const message = (text: string, stop = 'end_turn') => ({
+    status: 200,
+    json: {
+      id: 'msg_mock', type: 'message', role: 'assistant', model: body.model,
+      content: text ? [{ type: 'text', text }] : [],
+      stop_reason: stop, stop_sequence: null,
+      usage: { input_tokens: 100, output_tokens: 20 },
+    },
+  });
+
+  if (userText.includes('__REFUSE__')) return message('', 'refusal');
+  if (userText.includes('__TRUNCATE__')) return message('{"items":[', 'max_tokens');
+  if (userText.includes('__EMPTY__')) return message('');
+  if (userText.includes('__BADJSON__')) return message('not json at all');
+  if (userText.includes('__429__')) return { status: 429, json: { type: 'error', error: { type: 'rate_limit_error', message: 'slow down' } } };
+  if (userText.includes('__401__')) return { status: 401, json: { type: 'error', error: { type: 'authentication_error', message: 'bad key' } } };
+
+  const schema = body.output_config?.format?.schema;
+  if (schema?.properties?.steps) {
+    return message(JSON.stringify({ steps: ['Open the Drive', 'Add the preview popup.', 'open the drive', 'Test on mobile'] }));
+  }
+  if (schema?.properties?.items) {
+    const isImage = (content ?? []).some?.((b: any) => b.type === 'image');
+    const title = isImage ? 'Fix the row read from the picture' : `Clean: ${userText.split('Input: ')[1]?.trim() ?? '?'}`;
+    return message(JSON.stringify({
+      items: [{ type: 'task', title, project: 'OERP', tags: ['bug'], notes: null, due: null, priority: 2 }],
+    }));
+  }
+  if (String(body.system).includes('daily brief')) {
+    return message('আজ **৩টা কাজ** খোলা। সবচেয়ে জরুরি — `Ship the email release`।\n\n- কিছু overdue নেই');
+  }
+  return message('উত্তর: **২টা** কাজ বাকি।');
+}
+
+function startMock(): Promise<Server> {
+  return new Promise((resolve) => {
+    const server = createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => (raw += c));
+      req.on('end', () => {
+        const body = raw ? JSON.parse(raw) : {};
+        seen.push({ path: req.url ?? '', headers: req.headers, body });
+        const { status, json } = reply(body);
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(json));
+      });
+    });
+    server.listen(MOCK_PORT, '127.0.0.1', () => resolve(server));
+  });
+}
+
+// ── A real hub ───────────────────────────────────────────────────────────────
+
+function startHub(persist: string): ChildProcess {
+  const child = spawn('npx', [
+    'wrangler', 'dev', '--local', '--port', String(HUB_PORT), '--persist-to', persist,
+    '--test-scheduled',
+    '--var', `SYNC_KEY:${KEY}`,
+    '--var', 'ANTHROPIC_API_KEY:sk-ant-test-key-not-real',
+    '--var', `ANTHROPIC_BASE_URL:http://127.0.0.1:${MOCK_PORT}`,
+    '--var', `AI_DAILY_CAP:${CAP}`,
+    '--var', 'TIMEZONE:Asia/Dhaka',
+  ], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, CI: '1' } });
+  return child;
+}
+
+async function waitForHub() {
+  for (let i = 0; i < 90; i++) {
+    try {
+      const r = await fetch(`${HUB}/health`);
+      if (r.ok) return;
+    } catch { /* not up yet */ }
+    await wait(1000);
+  }
+  throw new Error('the hub did not start');
+}
+
+const call = (route: string, body?: unknown, key: string | null = KEY, method = 'POST') =>
+  fetch(`${HUB}/ai/${route}`, {
+    method,
+    headers: {
+      ...(key ? { authorization: `Bearer ${key}` } : {}),
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+const ctx = { today: '2026-10-19', weekday: 'Monday', projects: ['OERP', 'Personal'] };
+
+async function connect(name: string): Promise<{ store: MergeableStore; stop: () => Promise<void> }> {
+  const store = createMergeableStore(name);
+  const sync = await createWsSynchronizer(store, new WebSocket(`ws://localhost:${HUB_PORT}/sync/${KEY}`) as never);
+  await sync.startSync();
+  await wait(500);
+  return { store, stop: async () => { await sync.destroy(); } };
+}
+
+// ── The run ──────────────────────────────────────────────────────────────────
+
+const persist = mkdtempSync(join(tmpdir(), 'vault-ai-test-'));
+const mock = await startMock();
+const hub = startHub(persist);
+let hubLog = '';
+hub.stdout?.on('data', (d) => (hubLog += d));
+hub.stderr?.on('data', (d) => (hubLog += d));
+
+let failure: unknown;
+try {
+  await waitForHub();
+
+  // ── Who may knock ──────────────────────────────────────────────────────────
+  check('no key is refused', (await call('status', undefined, null, 'GET')).status === 403);
+  check('the wrong key is refused', (await call('status', undefined, 'wrong-key', 'GET')).status === 403);
+  const preflight = await fetch(`${HUB}/ai/normalise`, { method: 'OPTIONS' });
+  check('a preflight from another origin is answered without a key',
+    preflight.status === 204 && preflight.headers.get('access-control-allow-headers')?.includes('authorization') === true);
+
+  const status = await (await call('status', undefined, KEY, 'GET')).json() as any;
+  check('status reports the hub is configured', status.configured === true, JSON.stringify(status));
+  check('status names the model', status.model === 'claude-opus-5-5');
+  check('status carries the ceiling', status.cap === CAP && status.used === 0);
+  check('a response from the hub is readable cross-origin',
+    (await call('status', undefined, KEY, 'GET')).headers.get('access-control-allow-origin') === '*');
+
+  // ── Turning a line into a task ─────────────────────────────────────────────
+  seen.length = 0;
+  const res = await call('normalise', { text: 'kalke invoice pathate hobe', ...ctx });
+  const out = await res.json() as any;
+  const parsed = JSON.parse(out.text);
+  check('a typed line comes back as parseable items', res.status === 200 && parsed.items?.[0]?.type === 'task', out.text);
+  check('the line reached the model', JSON.stringify(seen[0]?.body).includes('kalke invoice pathate hobe'));
+
+  const sent = seen[0]?.body;
+  check('it asked for the configured model', sent?.model === 'claude-opus-5-5');
+  check('the reply is held to a schema', sent?.output_config?.format?.type === 'json_schema');
+  check('effort is set explicitly', sent?.output_config?.effort === 'low');
+  check('no sampling parameters are sent (this model rejects them)',
+    sent?.temperature === undefined && sent?.top_p === undefined && sent?.top_k === undefined);
+  check('thinking is left alone (it cannot be disabled)', sent?.thinking === undefined);
+  check('server-side fallback is opted in', sent?.fallbacks === 'default');
+  check('…with the header that gates it',
+    String(seen[0]?.headers['anthropic-beta'] ?? '').includes('server-side-fallback-2026-07-01'));
+  check('the key travels as the API expects', seen[0]?.headers['x-api-key'] === 'sk-ant-test-key-not-real');
+  check('the rules are in the system prompt, the line in the user turn',
+    String(sent?.system).includes('Task rules:') && !String(sent?.system).includes('kalke invoice'));
+
+  // ── What is refused before it costs anything ───────────────────────────────
+  const before = seen.length;
+  check('an empty line is refused', (await call('normalise', { text: '   ', ...ctx })).status === 400);
+  check('an over-long line is refused', (await call('normalise', { text: 'x'.repeat(2001), ...ctx })).status === 400);
+  check('a malformed date is refused', (await call('normalise', { text: 'a', ...ctx, today: 'tomorrow' })).status === 400);
+  check('invalid JSON is refused', (await fetch(`${HUB}/ai/normalise`, {
+    method: 'POST', headers: { authorization: `Bearer ${KEY}` }, body: '{nope',
+  })).status === 400);
+  check('refusals cost no API call', seen.length === before);
+  const afterRefusals = (await (await call('status', undefined, KEY, 'GET')).json() as any).used;
+  check('…and no budget', afterRefusals === 1, `used ${afterRefusals}`);
+
+  // ── Failures are reported by kind, never by content ────────────────────────
+  const failures: [string, number, string][] = [
+    ['__REFUSE__', 422, 'refused'],
+    ['__TRUNCATE__', 502, 'truncated'],
+    ['__EMPTY__', 502, 'empty'],
+    ['__BADJSON__', 502, 'upstream'],
+    ['__429__', 503, 'rate_limited'],
+    ['__401__', 502, 'auth'],
+  ];
+  for (const [marker, expectStatus, code] of failures) {
+    const r = await call('normalise', { text: marker, ...ctx });
+    const body = await r.json() as any;
+    check(`${code}: status ${expectStatus} and the code, nothing else`,
+      r.status === expectStatus && body.error === code && Object.keys(body).length === 1,
+      `${r.status} ${JSON.stringify(body)}`);
+  }
+
+  // ── Breaking a task into steps ─────────────────────────────────────────────
+  const stepsRes = await call('steps', {
+    title: 'Show a preview popup before download in the Drive', project: 'OERP',
+    tags: ['bug', 'email'], existing: ['Open the Drive'],
+  });
+  const steps = await stepsRes.json() as any;
+  check('steps come back as a list', stepsRes.status === 200 && Array.isArray(steps.steps));
+  check('a step that already exists is not offered again (any case)',
+    !steps.steps.some((s: string) => s.toLowerCase() === 'open the drive'), JSON.stringify(steps));
+  check('trailing full stops are stripped', steps.steps.includes('Add the preview popup'), JSON.stringify(steps));
+
+  // ── Reading a picture ──────────────────────────────────────────────────────
+  seen.length = 0;
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const imgRes = await call('image', { image: { media_type: 'image/png', data: png }, ...ctx });
+  const img = await imgRes.json() as any;
+  check('a picture comes back as tasks', imgRes.status === 200 && JSON.parse(img.text).items?.length === 1);
+  const blocks = seen[0]?.body?.messages?.[0]?.content ?? [];
+  check('the picture is sent as an image block', blocks[0]?.type === 'image' && blocks[0]?.source?.media_type === 'image/png');
+  check('a picture can only yield tasks, never notes',
+    JSON.stringify(seen[0]?.body?.output_config?.format?.schema).includes('"note"') === false);
+  check('an unsupported image type is refused',
+    (await call('image', { image: { media_type: 'image/bmp', data: png }, ...ctx })).status === 400);
+  check('non-base64 data is refused',
+    (await call('image', { image: { media_type: 'image/png', data: '<script>' }, ...ctx })).status === 400);
+
+  // ── Asking about the list — and what must never travel ─────────────────────
+  seen.length = 0;
+  const askRes = await call('ask', {
+    ...ctx,
+    question: 'OERP-র কী বাকি?',
+    open: [{
+      title: 'Ship the email release', status: 'todo', project: 'OERP', priority: 1, due: '2026-10-20',
+      // Fields the client must not be able to smuggle through:
+      notes: 'SECRET-NOTE-TEXT', originalInput: 'SECRET-ORIGINAL-WORDING', steps: 'SECRET-STEPS',
+      reportedBy: 'SECRET-REPORTER', evidenceUrl: 'https://secret.example/evidence',
+    }],
+    recent: [],
+  });
+  const asked = await askRes.json() as any;
+  check('an answer comes back', askRes.status === 200 && asked.answer?.includes('২টা'));
+  const wire = JSON.stringify(seen[0]?.body);
+  check('the task title was sent', wire.includes('Ship the email release'));
+  check('"due tomorrow" was worked out for the model', wire.includes('due tomorrow'));
+  check('notes never leave the hub', !wire.includes('SECRET-NOTE-TEXT'));
+  check('the original wording never leaves the hub', !wire.includes('SECRET-ORIGINAL-WORDING'));
+  check('steps and reporter never leave the hub', !wire.includes('SECRET-STEPS') && !wire.includes('SECRET-REPORTER'));
+  check('evidence links never leave the hub', !wire.includes('secret.example'));
+  check('a task with no title is refused',
+    (await call('ask', { ...ctx, question: 'q', open: [{ status: 'todo' }] })).status === 400);
+
+  // ── The ceiling ────────────────────────────────────────────────────────────
+  const used = (await (await call('status', undefined, KEY, 'GET')).json() as any).used;
+  let capped = 0;
+  for (let i = used; i < CAP + 2; i++) {
+    const r = await call('normalise', { text: `fill ${i}`, ...ctx });
+    if (r.status === 429) capped += 1;
+  }
+  check('the daily ceiling stops calls', capped >= 1, `${capped} refused`);
+  const hit = await call('normalise', { text: 'one too many', ...ctx });
+  check('…with 429 and the code', hit.status === 429 && (await hit.json() as any).error === 'capped');
+  const final = await (await call('status', undefined, KEY, 'GET')).json() as any;
+  check('the counter never passes the ceiling', final.used === CAP, `used ${final.used} of ${CAP}`);
+  const callsBefore = seen.length;
+  await call('normalise', { text: 'still no', ...ctx });
+  check('a capped request is never sent to the API', seen.length === callsBefore);
+
+} catch (err) {
+  failure = err;
+}
+
+// The ceiling test spent the day. Restart on fresh storage for the brief.
+hub.kill();
+await wait(1500);
+const persist2 = mkdtempSync(join(tmpdir(), 'vault-ai-test2-'));
+const hub2 = startHub(persist2);
+hub2.stdout?.on('data', (d) => (hubLog += d));
+hub2.stderr?.on('data', (d) => (hubLog += d));
+
+try {
+  await waitForHub();
+
+  const mac = await connect('mac');
+  const phone = await connect('phone');
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
+  // An empty vault has nothing to brief.
+  const empty = await (await call('brief', {})).json() as any;
+  check('an empty vault gets no brief (and no charge)', empty.status === 'skipped' && empty.reason === 'nothing_open', JSON.stringify(empty));
+
+  mac.store.setRow('tasks', 't1', {
+    title: 'Ship the email release', status: 'todo', priority: 1, project: 'OERP', order: 1,
+    createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', source: 'cli', tags: '["release","email"]', subtasks: '[]',
+  });
+  mac.store.setRow('tasks', 't2', {
+    title: 'Call the plumber', status: 'todo', priority: 2, order: 2,
+    createdAt: '2026-10-02T00:00:00.000Z', updatedAt: '2026-10-02T00:00:00.000Z', source: 'cli', tags: '[]', subtasks: '[]',
+  });
+  // A note with a secret — it must stay out of the prompt entirely.
+  mac.store.setRow('notes', 'n1', {
+    kind: 'code', title: 'Tablet', secret: 'enc.v1:SECRET-NOTE-CIPHERTEXT', body: 'SECRET-NOTE-BODY',
+    createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', order: 1,
+  });
+  await wait(900);
+
+  seen.length = 0;
+  const written = await (await call('brief', {})).json() as any;
+  check('the hub writes a brief', written.status === 'written' && written.date === day, JSON.stringify(written));
+  await wait(900);
+
+  const onPhone = phone.store.getRow('digests', day);
+  check('…and it reaches a device that never asked for it', typeof onPhone.markdown === 'string' && onPhone.markdown.includes('Ship the email release'),
+    JSON.stringify(onPhone));
+  check('…authored "api", so a Claude-written one can be told apart', onPhone.author === 'api');
+  check('…with the day\'s numbers attached', JSON.parse(String(onPhone.stats)).open === 2);
+
+  const briefWire = JSON.stringify(seen[0]?.body);
+  check('the brief prompt carried the tasks', briefWire.includes('Ship the email release') && briefWire.includes('Call the plumber'));
+  check('the most pressing task comes first', briefWire.indexOf('Ship the email release') < briefWire.indexOf('Call the plumber'));
+  check('notes never reached the brief prompt',
+    !briefWire.includes('SECRET-NOTE') && !briefWire.includes('Tablet'));
+
+  const again = await (await call('brief', {})).json() as any;
+  check('a second request the same day writes nothing', again.status === 'skipped' && again.reason === 'already_written');
+  const forced = await (await call('brief', { force: true })).json() as any;
+  check('refresh from the app rewrites it', forced.status === 'written');
+
+  // A brief Claude wrote in a session must survive the morning job.
+  const tomorrow = new Date(Date.now() + 36 * 3_600_000);
+  phone.store.setRow('digests', day, { markdown: 'Written by hand, in a session.', stats: '{}', createdAt: new Date().toISOString(), author: 'claude' });
+  await wait(900);
+  const scheduled = await fetch(`${HUB}/__scheduled?cron=30+0+*+*+*`);
+  await wait(1500);
+  check('the cron trigger runs', scheduled.status === 200);
+  check('the morning job does not overwrite a session-written brief',
+    mac.store.getCell('digests', day, 'markdown') === 'Written by hand, in a session.',
+    String(mac.store.getCell('digests', day, 'markdown')));
+
+  // And when there is nothing yet, the morning job writes one on its own.
+  phone.store.delRow('digests', day);
+  await wait(900);
+  seen.length = 0;
+  await fetch(`${HUB}/__scheduled?cron=30+0+*+*+*`);
+  await wait(2500);
+  check('the morning job writes a brief when there is none',
+    mac.store.getCell('digests', day, 'author') === 'api' && seen.length === 1,
+    `author=${mac.store.getCell('digests', day, 'author')} calls=${seen.length}`);
+
+  // …but replaces the machine-made floor.
+  phone.store.setRow('digests', day, { markdown: 'floor', stats: '{}', createdAt: new Date().toISOString(), author: 'auto' });
+  await wait(900);
+  const replaced = await (await call('brief', {})).json() as any;
+  check('a machine-made floor is replaced', replaced.status === 'written');
+  void tomorrow;
+
+  // The brief spends from the same budget as everything else.
+  let guard = 0;
+  while (guard++ < CAP + 2 && (await call('normalise', { text: `drain ${guard}`, ...ctx })).status !== 429) { /* spend it */ }
+  const held = await (await call('brief', { force: true })).json() as any;
+  check('the brief respects the ceiling', held.status === 'skipped' && held.reason === 'capped', JSON.stringify(held));
+
+  await mac.stop();
+  await phone.stop();
+} catch (err) {
+  failure ??= err;
+} finally {
+  hub2.kill();
+  mock.close();
+  await wait(500);
+  rmSync(persist, { recursive: true, force: true });
+  rmSync(persist2, { recursive: true, force: true });
+}
+
+// ── Report ───────────────────────────────────────────────────────────────────
+
+let failed = 0;
+for (const [name, ok, detail] of results) {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? `  — ${detail}` : ''}`);
+  if (!ok) failed += 1;
+}
+if (failure) {
+  console.log(`\nThe run stopped early: ${failure instanceof Error ? failure.stack : failure}`);
+  console.log('\n--- hub log (tail) ---\n' + hubLog.split('\n').slice(-25).join('\n'));
+  process.exit(1);
+}
+console.log(`\n${results.length - failed}/${results.length} promises hold`);
+process.exit(failed ? 1 : 0);

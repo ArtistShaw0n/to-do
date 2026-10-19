@@ -23,5 +23,27 @@ directory = "dist"
 not_found_handling = "single-page-application"
 binding = "ASSETS"
 
+# ── Claude ────────────────────────────────────────────────────────────────────
+# The hub calls the Anthropic API for what a phone cannot do alone: turning a
+# typed line into a task, reading a screenshot, answering a question, and
+# writing the morning brief. It needs one secret, set once and never committed:
+#
+#     npx wrangler secret put ANTHROPIC_API_KEY
+#
+# Without it the hub syncs exactly as before and every AI feature switches
+# itself off. Everything below is a setting, not a secret.
+[vars]
+# Which model answers. Opus is the default; a smaller one is a one-word change.
+AI_MODEL = "claude-opus-5-5"
+# Calls per day across every feature. The ceiling on what a leaked sync key can
+# spend — normal use is a few dozen.
+AI_DAILY_CAP = "150"
+# Where "today" is, for the cap and for the brief.
+TIMEZONE = "Asia/Dhaka"
+
+[triggers]
+# 00:30 UTC is 06:30 in Dhaka (UTC+6): the brief is written before the day starts.
+crons = ["30 0 * * *"]
+
 [observability]
 enabled = true

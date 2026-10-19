@@ -16,16 +16,18 @@
     "app:build": "tauri build",
     "todo": "node bin/todo.mjs",
     "sync:dev": "wrangler dev --port 8787 --local",
-    "sync:deploy": "wrangler deploy",
+    "sync:deploy": "pnpm build && wrangler deploy",
     "test:sync": "vite build --config vite.test.config.ts && node .test-out/sync.mjs",
     "test:store": "vite build --config vite.test.config.ts --mode store && node .test-out/store.mjs",
     "build:cli": "vite build --config vite.cli.config.ts",
     "check:generated": "vite build --config vite.cli.config.ts && git diff --exit-code --stat bin/lib/store.mjs",
     "test:bugs": "vite build --config vite.test.config.ts --mode bugs && node .test-out/bugs.mjs",
     "check:design": "node scripts/check-design-system.mjs",
-    "test:lock": "vite build --config vite.test.config.ts --mode lock && node .test-out/lock.mjs"
+    "test:lock": "vite build --config vite.test.config.ts --mode lock && node .test-out/lock.mjs",
+    "test:ai": "vite build --config vite.test.config.ts --mode ai && node .test-out/ai.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-global-shortcut": "^2.3.0",
     "@tauri-apps/plugin-notification": "^2.3.1",

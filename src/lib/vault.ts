@@ -6,7 +6,7 @@
  * localStorage so the UI can be iterated on without a native build.
  */
 
-import { emptyVault, NOTE_KINDS, PROJECT_COLORS, type Note, type NoteKind, type Priority, type Stats, type Status, type Task, type Vault } from './types';
+import { emptyVault, NOTE_KINDS, PROJECT_COLORS, type Note, type NoteKind, type Priority, type Status, type Task, type Vault } from './types';
 import { todayISO } from './dates';
 import { sortBugs } from './bugs';
 
@@ -301,42 +301,7 @@ export function sortNotes(notes: Note[]): Note[] {
 
 // ── Derived data ──────────────────────────────────────────────────────────────
 
-export const isOpen = (t: Task) => t.status !== 'done' && t.status !== 'cancelled';
-
-export function computeStats(vault: Vault, day = todayISO()): Stats {
-  const open = vault.tasks.filter(isOpen);
-  return {
-    date: day,
-    total: vault.tasks.length,
-    open: open.length,
-    doing: open.filter((t) => t.status === 'doing').length,
-    blocked: open.filter((t) => t.status === 'blocked').length,
-    overdue: open.filter((t) => t.due && t.due < day).length,
-    dueToday: open.filter((t) => t.due === day).length,
-    completedToday: vault.tasks.filter((t) => t.completedAt?.slice(0, 10) === day).length,
-    urgent: open.filter((t) => t.priority === 0).length,
-    streak: computeStreak(vault, day),
-  };
-}
-
-/** Consecutive days ending today (or yesterday) with at least one completion. */
-function computeStreak(vault: Vault, day: string): number {
-  const done = new Set(
-    vault.tasks.filter((t) => t.completedAt).map((t) => t.completedAt!.slice(0, 10)),
-  );
-  if (done.size === 0) return 0;
-
-  const cursor = new Date(`${day}T12:00:00`);
-  // Nothing finished yet today shouldn't read as a broken streak.
-  if (!done.has(day)) cursor.setDate(cursor.getDate() - 1);
-
-  let streak = 0;
-  while (done.has(todayISO(cursor))) {
-    streak += 1;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  return streak;
-}
+export { isOpen, computeStats } from './stats';
 
 /**
  * Newest first, plainly.

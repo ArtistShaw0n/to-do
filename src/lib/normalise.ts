@@ -25,6 +25,7 @@ import {
   addNote, addTask, deleteNote, deleteTask, KIND_TAGS, updateNote, updateTask,
 } from './vault';
 import { NOTE_KINDS, type NoteKind, type Priority, type Vault } from './types';
+import { normaliseSystem, normaliseUser, type NormaliseContext } from './prompts';
 
 export interface Draft {
   type: 'task';
@@ -253,57 +254,27 @@ export function noteLocally(raw: string): NoteDraft {
 // ── The Claude pass ──────────────────────────────────────────────────────────
 
 /**
- * The instructions handed to `claude -p`. Deliberately a condensed copy of
- * CLAUDE.md §2 rather than a pointer to it: the command runs from wherever the
- * app was launched, so the project file may not be loaded.
+ * The instructions handed to `claude -p`, and the context that goes with them.
+ *
+ * The rules themselves live in `prompts.ts`, shared with the sync hub: a phone
+ * has no CLI, so it asks the hub's API, and the same sentence has to come back
+ * as the same task whichever device it was typed on.
  *
  * It returns a *list*, because one typed line is not always one task. "invoice
  * pathate hobe ar PR review korte hobe" is two, and answering with a single
  * object silently threw the second one away.
  */
+export function normaliseContext(raw: string, vault: Vault): NormaliseContext {
+  return {
+    today: todayISO(),
+    weekday: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+    projects: vault.projects.map((p) => p.name),
+    raw,
+  };
+}
+
 export function buildPrompt(raw: string, vault: Vault): string {
-  const today = todayISO();
-  const weekday = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-  const projects = vault.projects.map((p) => p.name);
-
-  return `You convert one line of a user's mixed Bangla/Banglish/English input into task and note entries.
-
-Reply with ONE JSON object and nothing else — no prose, no markdown fence:
-{"items": [ ... ]}
-
-Each item is either a task or a note.
-
-Task item:
-{"type": "task", "title": string, "project": string|null, "tags": string[], "notes": string|null, "due": "YYYY-MM-DD"|null, "priority": 0|1|2|3}
-
-Note item — for reference material the user wants to keep, NOT work to be done. Passwords, PINs, wifi keys, account names, licence keys, any value they are recording to look up later:
-{"type": "note", "kind": "login"|"wifi"|"code"|"other", "title": string, "username": string|null, "secret": string|null, "url": string|null, "body": string}
-
-Today is ${today} (${weekday}). Resolve every relative date against that.
-Existing projects: ${projects.length ? projects.join(', ') : '(none yet)'}
-
-How many items:
-- One line usually means one item.
-- If the line clearly states several separate pieces of work, return one task each. "invoice pathate hobe ar PR review korte hobe" is two tasks. Do not merge them and do not drop any.
-- Do not invent items the line does not ask for.
-
-Task rules:
-- title: clean, imperative, specific English. "Send the invoice to the client", not "invoice". Translate Bangla to English; never echo the input back.
-- project: reuse an existing project when it fits. Do not invent one for a one-off. Personal errands go to "Personal". null if genuinely none.
-- tags: two kinds together.
-  Kind tags say what the work is — bug, enhancement, release, design, frontend, backend, responsive, architecture, requirements, billing, docs, test. A bug is a defect; an enhancement is a "would be better if".
-  Any OTHER tag names the module. For the OERP project use exactly these spellings: email, project-hub, hris, meet-chat, team-evaluation, shared-ui, property-booking, notification, portal.
-  Work spanning the whole project takes no module tag.
-- notes: one or two lines, under ~120 characters. Distil the point; never transcribe the input. Say what is wrong and what it should be. null if the title already says everything.
-- due: only when a time is actually implied. Time-of-day words (shokal, bikel, rat) are not dates — mention them in notes if they matter.
-- priority: 0 joruri/urgent/ekhoni, 1 important/guruttopurno/must, 2 default, 3 pore holeo hobe/whenever.
-
-Note rules:
-- Put the confidential value in "secret", never in "title". "tab er pass 5665" is {"type":"note","kind":"code","title":"Tablet","secret":"5665"}.
-- title names what the secret belongs to, in plain English.
-- A line telling you to *fix* or *build* a login page is a task, not a note. Only record a note when the line states a value to remember.
-
-Input: ${raw.trim()}`;
+  return `${normaliseSystem()}\n\n${normaliseUser(normaliseContext(raw, vault))}`;
 }
 
 // ── Reading the reply ────────────────────────────────────────────────────────

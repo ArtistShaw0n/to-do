@@ -61,9 +61,9 @@ screenshot, answer a question about your list, and write the morning brief — a
 without a Mac being on. Without one, none of that happens and nothing else
 changes.
 
-Create the key in the [Anthropic Console](https://console.anthropic.com/),
-**inside the organisation your API credit is attached to**, or the usage will not
-draw from it. Then, in your own terminal (never in a chat, never in the repo):
+Create the key in the Anthropic Console, **inside the organisation your API
+credit is attached to** (the same place the credit balance is shown), or the
+usage will not draw from it. Then, in your own terminal (never in a chat, never in the repo):
 
 ```bash
 npx wrangler secret put ANTHROPIC_API_KEY

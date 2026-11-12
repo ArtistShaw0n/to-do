@@ -15,11 +15,11 @@
 import type { Env } from './env';
 import type { TodoSync } from './index';
 import { secretsMatch } from './secret';
-import { AiError, checkKey, complete, DEFAULT_MODEL, isConfigured, parseJson, type AiFailure } from './ai';
+import { AiError, checkKey, complete, completeWithUsage, DEFAULT_MODEL, isConfigured, parseJson, type AiFailure } from './ai';
 import { dayIn, safeZone } from './day';
 import {
-  ASK_SYSTEM, IMAGE_SCHEMA, IMAGE_SYSTEM, STEPS_SCHEMA, STEPS_SYSTEM,
-  askUser, imageUser, stepsUser, type TaskLike,
+  ASK_SYSTEM, IMAGE_SCHEMA, IMAGE_SYSTEM, SESSIONS_SCHEMA, SESSIONS_SYSTEM, STEPS_SCHEMA, STEPS_SYSTEM,
+  askUser, imageUser, sessionsUser, stepsUser, type ExistingTask, type SessionLog, type TaskLike,
 } from './prompts';
 import { NORMALISE_SCHEMA, normaliseSystem, normaliseUser } from '../src/lib/prompts';
 
@@ -171,6 +171,7 @@ export async function handleAi(request: Request, env: Env, parts: string[]): Pro
       case 'image': return await image(request, env, today, cap);
       case 'ask': return await ask(request, env, today, cap);
       case 'brief': return await brief(request, env);
+      case 'sessions': return await sessions(request, env, today, cap);
       default: return json({ error: 'not_found' }, 404);
     }
   } catch (err) {
@@ -291,6 +292,66 @@ async function image(request: Request, env: Env, today: string, cap: number) {
   });
   parseJson(reply);
   return json({ text: reply });
+}
+
+/**
+ * Claude Code sessions → task entries. The Mac condenses and scrubs the logs; the
+ * hub only reads them, asks once, and says what it cost so the Mac can keep a
+ * monthly ledger.
+ */
+const MAX_SESSIONS_CHARS = 260_000;
+
+async function sessions(request: Request, env: Env, today: string, cap: number) {
+  const body = await readBody(request, MAX_SESSIONS_CHARS + 120_000);
+  if (!Array.isArray(body.sessions) || !body.sessions.length) throw new Bad('sessions must be a non-empty list');
+  if (body.sessions.length > 60) throw new Bad('sessions has more than 60 entries');
+  let total = 0;
+  const logs: SessionLog[] = body.sessions.map((raw, i) => {
+    if (!isObject(raw)) throw new Bad(`sessions[${i}] is not a session`);
+    const log = required(raw.log, `sessions[${i}].log`, MAX_SESSIONS_CHARS);
+    total += log.length;
+    return {
+      ref: required(raw.ref, `sessions[${i}].ref`, 8),
+      folder: required(raw.folder, `sessions[${i}].folder`, 300),
+      title: text(raw.title, `sessions[${i}].title`, 200),
+      started: required(raw.started, `sessions[${i}].started`, 40),
+      ended: required(raw.ended, `sessions[${i}].ended`, 40),
+      log,
+    };
+  });
+  if (total > MAX_SESSIONS_CHARS) throw new Bad(`the logs are longer than ${MAX_SESSIONS_CHARS} characters`, 413);
+
+  if (body.existing !== undefined && !Array.isArray(body.existing)) throw new Bad('existing must be a list');
+  const existing: ExistingTask[] = ((body.existing as unknown[] | undefined) ?? []).slice(0, 400).map((raw, i) => {
+    if (!isObject(raw)) throw new Bad(`existing[${i}] is not a task`);
+    return {
+      id: required(raw.id, `existing[${i}].id`, 40),
+      title: required(raw.title, `existing[${i}].title`, 300),
+      status: text(raw.status, 'status', 20) ?? 'todo',
+      project: text(raw.project, 'project', 80),
+      tags: list(raw.tags, 'tags', 12, 40),
+    };
+  });
+
+  const ctx = {
+    today: date(body.today, 'today'),
+    weekday: text(body.weekday, 'weekday', 12) ?? '',
+    projects: list(body.projects, 'projects', 60, 80),
+    existing,
+    sessions: logs,
+  };
+  await spend(env, today, cap);
+
+  const { text: reply, usage } = await completeWithUsage(env, {
+    system: SESSIONS_SYSTEM,
+    user: sessionsUser(ctx),
+    effort: 'medium',
+    maxTokens: 16_000,
+    schema: SESSIONS_SCHEMA,
+    timeoutMs: 240_000,
+  });
+  parseJson(reply);
+  return json({ text: reply, usage });
 }
 
 async function ask(request: Request, env: Env, today: string, cap: number) {

@@ -321,6 +321,25 @@ try {
   check('non-base64 data is refused',
     (await call('image', { image: { media_type: 'image/png', data: '<script>' }, ...ctx })).status === 400);
 
+  // ── Claude Code sessions → tasks ───────────────────────────────────────────
+  seen.length = 0;
+  const sessionBody = {
+    ...ctx,
+    existing: [{ id: 'abc123', title: 'Fix the email toolbar', status: 'todo', project: 'OERP', tags: ['bug', 'email'], notes: 'SECRET-NOTE' }],
+    sessions: [{ ref: 's1', folder: '/Users/x/m2s-email', started: '2026-11-12T03:00:00Z', ended: '2026-11-12T04:00:00Z', log: '[09:00] USER: toolbar ta thik koro\n[09:20] DID: edited Toolbar.tsx' }],
+  };
+  const sesRes = await call('sessions', sessionBody);
+  const ses = await sesRes.json() as any;
+  check('the sessions door answers with the reply and what it cost',
+    sesRes.status === 200 && typeof ses.text === 'string' && typeof ses.usage?.inputTokens === 'number', JSON.stringify(ses).slice(0, 200));
+  const sesPrompt = JSON.stringify(seen[0]?.body ?? {});
+  check('…the log and the existing task ids reach the model', sesPrompt.includes('toolbar ta thik koro') && sesPrompt.includes('abc123'));
+  check('…but a task\'s notes do not', !sesPrompt.includes('SECRET-NOTE'));
+  check('…held to the sessions schema', JSON.stringify(seen[0]?.body?.output_config?.format?.schema ?? {}).includes('"complete"'));
+  check('a request with no sessions is refused', (await call('sessions', { ...ctx, sessions: [] })).status === 400);
+  check('logs over the ceiling are refused before anything is spent',
+    (await call('sessions', { ...ctx, sessions: [{ ...sessionBody.sessions[0], log: 'x'.repeat(260_001) }] })).status >= 400);
+
   // ── Asking about the list — and what must never travel ─────────────────────
   seen.length = 0;
   const askRes = await call('ask', {

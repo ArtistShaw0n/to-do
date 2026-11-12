@@ -536,6 +536,7 @@ Proving it:
 ```bash
 pnpm test:ai                  # a real Worker + Durable Object against a stand-in for the API
 pnpm test:writes              # TinyBase's persister vs counting storage: a wake rewrites nothing
+pnpm test:sessions            # reading session logs: offsets, what is kept, secrets scrubbed
 node scripts/ai-smoke.mjs     # one real call per door, printed for a person to read
 node scripts/ai-eval.mjs      # his own history fed back through, to see if it lands where Claude Code did
 ```
@@ -543,6 +544,39 @@ node scripts/ai-eval.mjs      # his own history fed back through, to see if it l
 `test:ai` proves the plumbing and what is *left out* of every request; it cannot
 say how the model behaves on Banglish — that needs a key, which is what the other
 two are for.
+
+### Work done in Claude Code → tasks
+
+`scripts/sessions-to-tasks.mjs` turns the work done in Claude Code on this Mac into
+tasks, every hour at :05 (`bash scripts/install-session-import.sh`; `--uninstall`
+to stop). It reads `~/.claude/projects/*/*.jsonl` from the byte offset the last run
+stopped at — files run past a gigabyte, so nothing is read whole — keeps his
+messages, Claude's replies, files edited and commits, scrubs anything shaped like a
+secret, and asks the hub (`POST /ai/sessions`, `SESSIONS_SYSTEM` in
+`worker/prompts.ts`) what work it shows. The answer is written through the CLI.
+
+The rules it keeps, each tested (`pnpm test:sessions`, and the door in `test:ai`):
+
+- **It adds; it never changes a task he made.** A task of his that the work seems to
+  finish is reported, not closed. It may close a task *it* added in an earlier run
+  (ids in its state file) — otherwise "started at ten, finished at eleven" stays open.
+- **No new project without him.** A project the vault does not have is held and the
+  task filed with none; names he approves go in `allowNewProjects` in the state file.
+- **No duplicate titles, no unknown tags** (kind tags and the module table only), no
+  `bug` on finished work, nothing written when the hub is unreachable (the CLI
+  would fall back to the local file), one run at a time, and a monthly ceiling
+  (`VAULT_SESSIONS_MONTHLY_CAP`, $50).
+- The Vault app's own `claude -p` runs and subagent transcripts are skipped.
+
+```bash
+node scripts/sessions-to-tasks.mjs                       # dry run: what it would add, and the cost
+node scripts/sessions-to-tasks.mjs --since 2026-11-12T00:00:00Z   # dry run over a chosen window
+```
+
+State, ledger (`imported.jsonl`) and `runs.log` live in
+`~/Library/Application Support/com.shawon.vault/session-import/`. A dry run never
+moves the offsets. Measured on a real day: ~12 sessions, ~180 K characters, one call,
+~$0.70.
 
 ### Where things live
 
@@ -556,6 +590,7 @@ two are for.
 | `scripts/check-design-system.mjs` | the gate that keeps them honest |
 | `worker/index.ts` | the hub: routing, the Durable Object, the day's budget, the cron |
 | `worker/aiRoutes.ts`, `worker/ai.ts`, `worker/brief.ts` | Claude's doors, the one place that calls it, the morning brief |
+| `scripts/sessions-to-tasks.mjs`, `scripts/lib/sessions.mjs` | Claude Code sessions → tasks, hourly (see *Work done in Claude Code → tasks*) |
 | `worker/storage.ts` | the persister's storage, wrapped so a wake does not rewrite the vault (see *Waking the Durable Object…*) |
 | `src/lib/prompts.ts`, `worker/prompts.ts` | what Claude is told |
 | `src/lib/ai.ts` | the app's side: knocks on the hub, knows whether it is switched on |

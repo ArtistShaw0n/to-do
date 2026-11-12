@@ -187,6 +187,9 @@ commands.add = (positional, flags) => {
     recurrence: flags.repeat && flags.repeat !== true ? String(flags.repeat) : undefined,
     createdAt: nowISO(),
     updatedAt: nowISO(),
+    // Added as already finished (the session importer records work done): it
+    // counts as finished today, like anything closed with `done`.
+    completedAt: status === 'done' || status === 'cancelled' ? nowISO() : undefined,
     order: (vault.meta.lastSeq = (vault.meta.lastSeq || 0) + 1),
     source: flags.source && flags.source !== true ? String(flags.source) : 'claude',
     // Keeps the user's original Banglish phrasing next to the normalised title.

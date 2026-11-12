@@ -31,6 +31,18 @@ function answer(body) {
   if (schema?.properties?.steps) {
     return JSON.stringify({ steps: ['Reproduce it on the live build', 'Find the component that renders it', 'Fix and check on mobile', 'Ship in the next release'] });
   }
+  if (schema?.properties?.items?.items?.properties?.action) {
+    // Sessions → tasks: one of each kind of answer, so every path can be seen.
+    const refs = [...text.matchAll(/### (s\d+)/g)].map((m) => m[1]);
+    const existingId = (text.match(/^- ([a-z0-9]{6}) — todo/m) ?? [])[1] ?? null;
+    const r = refs[0] ?? 's1';
+    return JSON.stringify({ seen: `Stand-in reading of ${refs.length} sessions.`, items: [
+      { action: 'add', existing: null, status: 'done', title: 'Restyle the HRIS stat cards as tiles', project: 'OERP', tags: ['frontend', 'hris', 'bug'], notes: 'Applied on every My Panel page.', due: null, priority: 2, session: r, evidence: 'shobgulo page er cart gulo ei formate e kore deo' },
+      { action: 'add', existing: null, status: 'todo', title: 'Write the Fire Effect Read Me', project: 'Envato Market', tags: ['docs', 'made-up-module'], notes: 'Not started.', due: null, priority: 2, session: r, evidence: '3 koro' },
+      { action: 'add', existing: null, status: 'todo', title: 'Fix the email toolbar', project: 'OERP', tags: ['bug', 'email'], notes: null, due: null, priority: 2, session: r, evidence: 'dup' },
+      { action: 'complete', existing: existingId, status: 'done', title: 'whatever', project: null, tags: [], notes: null, due: null, priority: 2, session: r, evidence: 'x' },
+    ] });
+  }
   if (schema?.properties?.items) {
     const picture = (content ?? []).find?.((b) => b.type === 'image');
     if (picture) {

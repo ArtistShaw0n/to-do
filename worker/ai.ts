@@ -46,6 +46,15 @@ export interface Ask {
   maxTokens: number;
   /** Holds the reply to this JSON schema, so it is always parseable. */
   schema?: Record<string, unknown>;
+  /** How long to wait. Most calls are small; reading a day of sessions is not. */
+  timeoutMs?: number;
+}
+
+/** What a call cost, in the API's own units. */
+export interface Usage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 /** Anthropic's own name for what went wrong ("authentication_error", …). Never its message. */
@@ -74,6 +83,11 @@ export const isConfigured = (env: AiEnv) => !!env.ANTHROPIC_API_KEY?.trim();
 
 /** Ask once and return the text of the answer. */
 export async function complete(env: AiEnv, ask: Ask): Promise<string> {
+  return (await completeWithUsage(env, ask)).text;
+}
+
+/** The same, with what it cost — for callers that keep a ledger. */
+export async function completeWithUsage(env: AiEnv, ask: Ask): Promise<{ text: string; usage: Usage }> {
   if (!isConfigured(env)) throw new AiError('not_configured', 'no API key on the hub');
 
   const client = new Anthropic({
@@ -82,7 +96,7 @@ export async function complete(env: AiEnv, ask: Ask): Promise<string> {
     // One retry covers a dropped connection; more would turn a slow API into a
     // slow app, and every caller has a fallback that is quicker than waiting.
     maxRetries: 1,
-    timeout: 50_000,
+    timeout: ask.timeoutMs ?? 50_000,
   });
 
   let response;
@@ -117,7 +131,15 @@ export async function complete(env: AiEnv, ask: Ask): Promise<string> {
     .join('')
     .trim();
   if (!text) throw new AiError('empty', 'the answer was empty');
-  return text;
+  return {
+    text,
+    usage: {
+      model: response.model,
+      inputTokens: response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0)
+        + (response.usage.cache_creation_input_tokens ?? 0),
+      outputTokens: response.usage.output_tokens,
+    },
+  };
 }
 
 /** For schema-bound calls: the reply, parsed, or a failure the client can fall back from. */

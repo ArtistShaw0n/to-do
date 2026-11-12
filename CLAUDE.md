@@ -581,6 +581,14 @@ Each task is dated when the work happened (`add --at <iso>`). Done once on
 2026-11-12, from the first session (24 May 2026); finished batches are recorded in
 `backfillDone`, so a rerun resumes rather than repeats.
 
+**Reads run out too.** The first backfill wrote each task with its own CLI call — one
+hub connection each — and woke the hub to compare every key it already held: 90% of
+the free plan's 5 million daily rows read by mid-afternoon. Now a run writes
+everything over one connection (`todo import <file.json>`), the hub remembers what
+its load listed so a wake reads the vault once (`test:writes`), and an unfinished
+backfill is finished by the hourly run six batches at a time (`backfillPending`,
+`backfillResumeAfter` in the state file).
+
 State, ledger (`imported.jsonl`) and `runs.log` live in
 `~/Library/Application Support/com.shawon.vault/session-import/`. A dry run never
 moves the offsets. Measured on a real day: ~12 sessions, ~180 K characters, one call,

@@ -12,6 +12,7 @@
  * Run `node bin/todo.mjs help` for the full surface.
  */
 
+import { readFileSync } from 'node:fs';
 import {
   PRIORITY_LABELS, SEVERITIES, STATUSES, computeStats, ensureProject, findTask,
   loadVault, newId, nowISO, parseDate, saveVault, todayISO, vaultPath, writeAppConfig,
@@ -206,6 +207,29 @@ commands.add = (positional, flags) => {
   vault.tasks.push(task);
   saveVault(vault);
   process.stdout.write(`${green('✓ added')}\n${renderTask(task)}\n`);
+  return task;
+};
+
+/**
+ * Several changes from one JSON file, over one connection to the hub.
+ *
+ * The session importer used to run `add` once per task, and every run is a
+ * connection that makes the hub read the whole vault: a few hundred tasks of
+ * history cost millions of reads, which the free plan caps at five million a
+ * day. Each entry is `{ "title": "...", "flags": { ...as add takes them } }` or
+ * `{ "done": "<id>" }`. Prints the resulting ids as one JSON line at the end.
+ */
+commands.import = (positional) => {
+  const file = positional[0];
+  if (!file) die('import needs a JSON file');
+  const entries = JSON.parse(readFileSync(file, 'utf8'));
+  if (!Array.isArray(entries)) die('import needs a JSON list');
+  const ids = [];
+  for (const e of entries) {
+    if (e.done) { commands.done([String(e.done)]); ids.push(String(e.done)); continue; }
+    ids.push(commands.add([String(e.title)], e.flags ?? {}).id);
+  }
+  process.stdout.write(`IDS ${JSON.stringify(ids)}\n`);
 };
 
 /**

@@ -25,6 +25,8 @@ function fakeStorage() {
   const self = {
     /** Rows written. A put of a value that is already there still counts — as it does on the platform. */
     written: 0,
+    /** Keys read one by one, beyond the listing that loads the vault. */
+    reads: 0,
     /** The platform saying "daily rows_written limit exceeded". */
     refuse: false,
     size: () => data.size,
@@ -36,6 +38,7 @@ function fakeStorage() {
       const txn = {
         async get(keys: string[]) {
           if (keys.length > 128) throw new Error('get() takes at most 128 keys');
+          self.reads += keys.length;
           return new Map(keys.filter((k) => data.has(k)).map((k) => [k, structuredClone(data.get(k))]));
         },
         async put(entries: Record<string, unknown>) {
@@ -98,7 +101,9 @@ check('the first save still writes everything', lean.written === entries && lean
   `${lean.written} written, ${lean.size()} stored`);
 
 before = lean.written;
+const readsBefore = lean.reads;
 const second = await wake(storage);
+check('…and reads nothing beyond the listing that loads it (reads run out too)', lean.reads - readsBefore === 0, `${lean.reads - readsBefore} keys read`);
 check('waking up again writes nothing', lean.written - before === 0, `${lean.written - before} rows`);
 check('…and what it woke to is the whole vault',
   second.store.getRowCount('tasks') === 60 && second.store.getCell('tasks', 't7', 'title') === 'Task number 7');

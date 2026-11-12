@@ -300,9 +300,11 @@ async function image(request: Request, env: Env, today: string, cap: number) {
  * monthly ledger.
  */
 const MAX_SESSIONS_CHARS = 260_000;
+const MAX_SESSIONS_BYTES = 1_000_000;
 
 async function sessions(request: Request, env: Env, today: string, cap: number) {
-  const body = await readBody(request, MAX_SESSIONS_CHARS + 120_000);
+  // The ceiling on what is read is in bytes, and Bengali is three bytes a character.
+  const body = await readBody(request, MAX_SESSIONS_BYTES);
   if (!Array.isArray(body.sessions) || !body.sessions.length) throw new Bad('sessions must be a non-empty list');
   if (body.sessions.length > 60) throw new Bad('sessions has more than 60 entries');
   let total = 0;

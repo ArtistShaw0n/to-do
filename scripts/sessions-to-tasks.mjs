@@ -141,14 +141,20 @@ function collect(state, since) {
   return { sessions, next };
 }
 
+/** The hub reads at most 1 MB; Bengali is three bytes a character, so batches are measured both ways. */
+const BATCH_BYTES = 600_000;
+
 function batches(sessions) {
   const out = [];
   let cur = [];
   let size = 0;
+  let bytes = 0;
   for (const s of sessions) {
-    if (cur.length && size + s.log.length > BATCH_CHARS) { out.push(cur); cur = []; size = 0; }
+    const b = Buffer.byteLength(s.log);
+    if (cur.length && (size + s.log.length > BATCH_CHARS || bytes + b > BATCH_BYTES)) { out.push(cur); cur = []; size = 0; bytes = 0; }
     cur.push(s);
     size += s.log.length;
+    bytes += b;
   }
   if (cur.length) out.push(cur);
   return out;
@@ -224,23 +230,36 @@ function cli(argv) {
   return out;
 }
 
-function apply(item, at) {
-  if (item.action === 'complete') return cli(['done', item.task.id]);
-  const argv = ['add', item.title, '--p', String(item.priority)];
-  if (at) argv.push('--at', at);
-  if (item.project) argv.push('--project', item.project);
-  if (item.tags.length) argv.push('--tag', item.tags.join(','));
-  if (item.notes) argv.push('--notes', item.notes);
-  if (item.due) argv.push('--due', item.due);
-  if (item.evidence) argv.push('--raw', item.evidence);
-  if (item.status === 'done') argv.push('--status', 'done');
-  return cli(argv);
+/** Everything a run decided, written in one CLI call — one connection to the hub. Returns the ids in order. */
+function applyAll(items, atOf = () => undefined) {
+  if (!items.length) return [];
+  const entries = items.map((item) => {
+    if (item.action === 'complete') return { done: item.task.id };
+    const flags = { p: String(item.priority) };
+    const at = atOf(item);
+    if (at) flags.at = at;
+    if (item.project) flags.project = item.project;
+    if (item.tags.length) flags.tag = item.tags.join(',');
+    if (item.notes) flags.notes = item.notes;
+    if (item.due) flags.due = item.due;
+    if (item.evidence) flags.raw = item.evidence;
+    if (item.status === 'done') flags.status = 'done';
+    return { title: item.title, flags };
+  });
+  mkdirSync(STATE_DIR, { recursive: true });
+  const file = join(STATE_DIR, `batch-${process.pid}.json`);
+  writeFileSync(file, JSON.stringify(entries));
+  try {
+    const out = cli(['import', file]);
+    const ids = JSON.parse(out.match(/^IDS (.*)$/m)?.[1] ?? 'null');
+    if (!Array.isArray(ids) || ids.length !== items.length) throw new Error('the CLI did not report every id');
+    return ids;
+  } finally {
+    try { unlinkSync(file); } catch { /* gone */ }
+  }
 }
 
 // ── Reading the past, once ───────────────────────────────────────────────────
-
-/** The new task's id, from the CLI's own confirmation line. */
-const idFrom = (out) => out.replace(/\x1b\[[0-9;]*m/g, '').match(/^\S*\s*([a-z0-9]{6})\s{2}/m)?.[1];
 
 /**
  * Every session from the very first up to where the hourly run begins
@@ -275,7 +294,13 @@ function pastUnits(until) {
   return units.sort((a, b) => (a.started < b.started ? -1 : 1));
 }
 
-async function backfill(config, state) {
+/**
+ * `limit`: at most this many batches, then stop — the hourly run finishes an
+ * unfinished backfill a few batches at a time instead of all at once, so the hub's
+ * daily read and write allowances are never spent in one go.
+ */
+async function backfill(config, state, { limit = Infinity } = {}) {
+  let ran = 0;
   const until = state.since;
   const units = pastUnits(until).filter((u) => !MONTH_ARG || u.day.startsWith(MONTH_ARG));
   const months = [...new Set(units.map((u) => u.day.slice(0, 7)))];
@@ -284,11 +309,16 @@ async function backfill(config, state) {
   const totals = { calls: 0, cost: 0, added: 0, done: 0, completed: 0, refused: 0, held: new Map(), silent: 0 };
 
   for (const month of months) {
+    // A month is finished as a whole: its batches are cut afresh each run, so
+    // their numbers only mean something inside one run.
+    if (APPLY && state.backfillDone.includes(month)) continue;
     let ref = 0;
     const monthUnits = units.filter((u) => u.day.startsWith(month)).map((u) => ({ ...u, ref: `s${++ref}` }));
     for (const [gi, group] of batches(monthUnits).entries()) {
       const key = `${month}#${gi}`;
       if (APPLY && state.backfillDone.includes(key)) continue;
+      if (ran >= limit) { log(`backfill paused after ${ran} batches; continues next hour`); return false; }
+      ran += 1;
       if (APPLY && state.spent >= MONTHLY_CAP) throw new Error(`stopped at ${key}: this month's ceiling of $${MONTHLY_CAP} is spent`);
 
       if (!(await openSession({ quiet: true }))) throw new Error('could not reach the hub; stopped');
@@ -329,16 +359,17 @@ async function backfill(config, state) {
         continue;
       }
 
-      for (const it of accepted) {
-        const out = apply(it, it.action === 'add' ? it.session?.ended : undefined);
-        const id = it.action === 'add' ? idFrom(out) : it.task.id;
+      const ids = applyAll(accepted, (it) => (it.action === 'add' ? it.session?.ended : undefined));
+      accepted.forEach((it, i) => {
+        const id = ids[i];
         if (it.action === 'add' && id) state.imported = [...(state.imported ?? []), id].slice(-5000);
         appendFileSync(LEDGER, `${JSON.stringify({ at: new Date().toISOString(), backfill: key, id, action: it.action, status: it.status, title: it.title, project: it.project, day: it.session?.day, session: it.session?.file })}\n`);
-      }
+      });
       state.spent += cost;
       state.backfillDone.push(key);
       writeState(state);
     }
+    if (APPLY) { state.backfillDone.push(month); writeState(state); }
   }
   const held = [...totals.held].map(([p, n]) => `${p} (${n})`).join(', ');
   const verdict = `${APPLY ? 'backfill' : 'backfill dry'}: ${totals.calls} calls, $${totals.cost.toFixed(2)}, `
@@ -346,6 +377,15 @@ async function backfill(config, state) {
     + `${totals.silent} session-days gave nothing${held ? `; held projects: ${held}` : ''}`;
   log(verdict);
   say(`\n${verdict}`);
+  if (APPLY) { state.backfillPending = false; writeState(state); }
+  return true;
+}
+
+/** The hourly run's second job: carry on with the past, if any is left and the hub's day allows it. */
+async function continueBackfill(config, state) {
+  if (!APPLY || !state.backfillPending) return;
+  if (state.backfillResumeAfter && new Date().toISOString() < state.backfillResumeAfter) return;
+  await backfill(config, state, { limit: Number(process.env.VAULT_BACKFILL_PER_RUN) || 6 });
 }
 
 // ── The run ──────────────────────────────────────────────────────────────────
@@ -377,6 +417,7 @@ async function main() {
     if (!sessions.length) {
       if (APPLY) { state.files = next; writeState(state); }
       log(`${APPLY ? 'apply' : 'dry'}: nothing new`);
+      await continueBackfill(config, state);
       return;
     }
 
@@ -415,22 +456,20 @@ async function main() {
     }
 
     if (APPLY) {
-      for (const item of report.accepted) {
-        try {
-          const out = apply(item);
-          // The new task's id, from the CLI's own confirmation line, so a later run may close it.
-          const id = item.action === 'add'
-            ? out.replace(/\x1b\[[0-9;]*m/g, '').match(/^\S*\s*([a-z0-9]{6})\s{2}/m)?.[1] : item.task.id;
-          if (item.action === 'add' && id) state.imported = [...(state.imported ?? []), id].slice(-2000);
-          appendFileSync(LEDGER, `${JSON.stringify({ at: new Date().toISOString(), id, action: item.action, status: item.status, title: item.title, project: item.project, session: item.session?.file })}\n`);
-        } catch (err) {
-          throw new Error(`stopped while writing "${item.title}": ${String(err.stderr || err.message).trim().slice(0, 200)}`);
-        }
+      let ids;
+      try { ids = applyAll(report.accepted); } catch (err) {
+        throw new Error(`stopped while writing: ${String(err.stderr || err.message).trim().slice(0, 200)}`);
       }
+      report.accepted.forEach((item, i) => {
+        const id = ids[i];
+        if (item.action === 'add' && id) state.imported = [...(state.imported ?? []), id].slice(-5000);
+        appendFileSync(LEDGER, `${JSON.stringify({ at: new Date().toISOString(), id, action: item.action, status: item.status, title: item.title, project: item.project, session: item.session?.file })}\n`);
+      });
       state.files = next;
       state.spent += report.cost;
       writeState(state);
     }
+    await continueBackfill(config, state);
 
     const verdict = `${APPLY ? 'apply' : 'dry'}: ${report.sessions} sessions, ${report.chars} chars, ${report.calls} call(s), `
       + `${report.tokens[0]}+${report.tokens[1]} tokens, $${report.cost.toFixed(3)}, `

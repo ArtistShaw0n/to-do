@@ -172,6 +172,11 @@ commands.add = (positional, flags) => {
   const status = flags.status && flags.status !== true ? String(flags.status) : 'todo';
   if (!STATUSES.includes(status)) die(`status must be one of: ${STATUSES.join(', ')}`);
 
+  // When the work actually happened — for recording past work, not today's.
+  const at = flags.at && flags.at !== true ? new Date(String(flags.at)) : null;
+  if (at && Number.isNaN(at.getTime())) die(`could not understand --at "${flags.at}"`);
+  const stamp = at ? at.toISOString() : nowISO();
+
   const task = {
     id: newId(),
     title,
@@ -185,11 +190,11 @@ commands.add = (positional, flags) => {
     estimateMin: flags.est ? Number(flags.est) || undefined : undefined,
     subtasks: csv(flags.sub).map((s) => ({ id: newId(), title: s, done: false })),
     recurrence: flags.repeat && flags.repeat !== true ? String(flags.repeat) : undefined,
-    createdAt: nowISO(),
-    updatedAt: nowISO(),
+    createdAt: stamp,
+    updatedAt: stamp,
     // Added as already finished (the session importer records work done): it
-    // counts as finished today, like anything closed with `done`.
-    completedAt: status === 'done' || status === 'cancelled' ? nowISO() : undefined,
+    // counts as finished when the work was, like anything closed with `done`.
+    completedAt: status === 'done' || status === 'cancelled' ? stamp : undefined,
     order: (vault.meta.lastSeq = (vault.meta.lastSeq || 0) + 1),
     source: flags.source && flags.source !== true ? String(flags.source) : 'claude',
     // Keeps the user's original Banglish phrasing next to the normalised title.

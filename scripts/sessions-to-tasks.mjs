@@ -24,12 +24,14 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { closeSession, loadVault, openSession, readSyncConfig } from '../bin/vault.mjs';
-import { condense, readNew } from './lib/sessions.mjs';
+import { condense, condenseParts, readNew } from './lib/sessions.mjs';
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--apply');
 const SINCE_ARG = args.includes('--since') ? args[args.indexOf('--since') + 1] : undefined;
 const QUIET = args.includes('--quiet');
+const BACKFILL = args.includes('--backfill');
+const MONTH_ARG = args.includes('--month') ? args[args.indexOf('--month') + 1] : undefined;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -222,9 +224,10 @@ function cli(argv) {
   return out;
 }
 
-function apply(item) {
+function apply(item, at) {
   if (item.action === 'complete') return cli(['done', item.task.id]);
   const argv = ['add', item.title, '--p', String(item.priority)];
+  if (at) argv.push('--at', at);
   if (item.project) argv.push('--project', item.project);
   if (item.tags.length) argv.push('--tag', item.tags.join(','));
   if (item.notes) argv.push('--notes', item.notes);
@@ -232,6 +235,117 @@ function apply(item) {
   if (item.evidence) argv.push('--raw', item.evidence);
   if (item.status === 'done') argv.push('--status', 'done');
   return cli(argv);
+}
+
+// ── Reading the past, once ───────────────────────────────────────────────────
+
+/** The new task's id, from the CLI's own confirmation line. */
+const idFrom = (out) => out.replace(/\x1b\[[0-9;]*m/g, '').match(/^\S*\s*([a-z0-9]{6})\s{2}/m)?.[1];
+
+/**
+ * Every session from the very first up to where the hourly run begins
+ * (`state.since`), a session-day at a time, month by month from the oldest — so a
+ * task left open in May and finished in June ends up done. A long day is split
+ * into parts, never cut. Each task carries the date the work happened.
+ */
+function pastUnits(until) {
+  const units = [];
+  for (const file of sessionFiles()) {
+    const { events } = readNew(file, 0);
+    const title = events.filter((e) => e.kind === 'title').at(-1)?.text;
+    const work = events.filter((e) => e.kind !== 'title' && e.ts < until);
+    const byDay = new Map();
+    for (const e of work) {
+      const day = dhakaDay(new Date(e.ts));
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day).push(e);
+    }
+    let lastUser;
+    for (const [day, evs] of [...byDay].sort(([a], [b]) => (a < b ? -1 : 1))) {
+      const earlier = evs[0].kind === 'user' ? undefined : lastUser;
+      lastUser = evs.filter((e) => e.kind === 'user').at(-1)?.text ?? lastUser;
+      if (!evs.some((e) => e.kind === 'user') && !earlier) continue;
+      const parts = condenseParts(evs, { earlier });
+      parts.forEach((log, i) => units.push({
+        file, day, title: parts.length > 1 ? `${title ?? 'session'} — part ${i + 1} of ${parts.length}` : title,
+        folder: evs.find((e) => e.cwd)?.cwd ?? file, started: evs[0].ts, ended: evs.at(-1).ts, log,
+      }));
+    }
+  }
+  return units.sort((a, b) => (a.started < b.started ? -1 : 1));
+}
+
+async function backfill(config, state) {
+  const until = state.since;
+  const units = pastUnits(until).filter((u) => !MONTH_ARG || u.day.startsWith(MONTH_ARG));
+  const months = [...new Set(units.map((u) => u.day.slice(0, 7)))];
+  say(`The past: ${units.length} session-days in ${months.length} months, ${units.reduce((n, u) => n + u.log.length, 0)} chars, up to ${until}.`);
+  state.backfillDone ??= [];
+  const totals = { calls: 0, cost: 0, added: 0, done: 0, completed: 0, refused: 0, held: new Map(), silent: 0 };
+
+  for (const month of months) {
+    let ref = 0;
+    const monthUnits = units.filter((u) => u.day.startsWith(month)).map((u) => ({ ...u, ref: `s${++ref}` }));
+    for (const [gi, group] of batches(monthUnits).entries()) {
+      const key = `${month}#${gi}`;
+      if (APPLY && state.backfillDone.includes(key)) continue;
+      if (APPLY && state.spent >= MONTHLY_CAP) throw new Error(`stopped at ${key}: this month's ceiling of $${MONTHLY_CAP} is spent`);
+
+      if (!(await openSession({ quiet: true }))) throw new Error('could not reach the hub; stopped');
+      const vault = loadVault();
+      await closeSession();
+      const open = vault.tasks.filter((t) => !['done', 'cancelled'].includes(t.status));
+      const done = vault.tasks.filter((t) => t.status === 'done')
+        .sort((a, b) => ((b.completedAt ?? '') < (a.completedAt ?? '') ? -1 : 1));
+      const existing = [...open, ...done].slice(0, 400)
+        .map((t) => ({ id: t.id, title: t.title, status: t.status, project: t.project, tags: t.tags }));
+      const projects = vault.projects.map((p) => p.name);
+      const lastDay = group.at(-1).day;
+
+      const { reply, usage } = await ask(config, {
+        today: lastDay,
+        weekday: new Date(`${lastDay}T12:00:00+06:00`).toLocaleDateString('en-US', { weekday: 'long' }),
+        projects,
+        existing,
+        sessions: group.map(({ ref, folder, title, started, ended, log: l }) => ({ ref, folder, title, started, ended, log: l })),
+      });
+      const cost = costOf(usage);
+      totals.calls += 1;
+      totals.cost += cost;
+      const { accepted, refused } = vet(reply.items, existing, group, projects,
+        state.allowNewProjects ?? [], state.imported ?? [], state.projectAliases ?? {});
+      totals.refused += refused.length;
+      totals.silent += group.filter((u) => /\] USER: /.test(u.log) && !reply.items.some((i) => i.session === u.ref)).length;
+      for (const it of accepted) {
+        if (it.held) totals.held.set(it.held, (totals.held.get(it.held) ?? 0) + 1);
+        if (it.action === 'complete') totals.completed += 1;
+        else if (it.status === 'done') totals.done += 1;
+        else totals.added += 1;
+      }
+      say(`  ${key}: ${group.length} session-days, ${group.reduce((n, u) => n + u.log.length, 0)} chars, $${cost.toFixed(3)} → `
+        + `${accepted.length} accepted, ${refused.length} refused. ${reply.seen}`);
+      if (!APPLY) {
+        for (const it of accepted) say(`      ${it.action === 'complete' ? '✓ complete' : `+ ${it.status}`} ${it.title}  {${it.project ?? (it.held ? `(${it.held}?)` : '—')} · ${it.tags.join(',')}}  [${it.session?.day}]`);
+        continue;
+      }
+
+      for (const it of accepted) {
+        const out = apply(it, it.action === 'add' ? it.session?.ended : undefined);
+        const id = it.action === 'add' ? idFrom(out) : it.task.id;
+        if (it.action === 'add' && id) state.imported = [...(state.imported ?? []), id].slice(-5000);
+        appendFileSync(LEDGER, `${JSON.stringify({ at: new Date().toISOString(), backfill: key, id, action: it.action, status: it.status, title: it.title, project: it.project, day: it.session?.day, session: it.session?.file })}\n`);
+      }
+      state.spent += cost;
+      state.backfillDone.push(key);
+      writeState(state);
+    }
+  }
+  const held = [...totals.held].map(([p, n]) => `${p} (${n})`).join(', ');
+  const verdict = `${APPLY ? 'backfill' : 'backfill dry'}: ${totals.calls} calls, $${totals.cost.toFixed(2)}, `
+    + `${totals.added} open + ${totals.done} done added, ${totals.completed} closed, ${totals.refused} refused, `
+    + `${totals.silent} session-days gave nothing${held ? `; held projects: ${held}` : ''}`;
+  log(verdict);
+  say(`\n${verdict}`);
 }
 
 // ── The run ──────────────────────────────────────────────────────────────────
@@ -249,6 +363,8 @@ async function main() {
       log(`stopped: this month's ceiling of $${MONTHLY_CAP} is spent ($${state.spent.toFixed(2)})`);
       return;
     }
+    if (BACKFILL) { await backfill(config, state); return; }
+
     // A dry run with --since looks at a chosen window from scratch.
     const view = SINCE_ARG ? { ...state, files: {} } : state;
     const since = SINCE_ARG ? new Date(SINCE_ARG).toISOString() : state.since;

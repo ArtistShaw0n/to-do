@@ -153,7 +153,29 @@ const LIMITS = { user: 1200, claude: 500, session: 60_000 };
 const hhmm = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
 /** The events of one session as short lines: `[09:14] USER: …`, `CLAUDE: …`, `DID: …`. */
-export function condense(events, { earlier } = {}) {
+export function condense(events, opts = {}) {
+  return fit(condenseLines(events, opts));
+}
+
+/**
+ * The same lines, split into parts of at most `max` characters instead of cut —
+ * for reading the past, where a long day must not lose its middle.
+ */
+export function condenseParts(events, opts = {}, max = 55_000) {
+  const parts = [];
+  let cur = [];
+  let size = 0;
+  for (const l of condenseLines(events, opts)) {
+    const line = l.length > max ? clip(l, max) : l;
+    if (cur.length && size + line.length + 1 > max) { parts.push(cur.join('\n')); cur = []; size = 0; }
+    cur.push(line);
+    size += line.length + 1;
+  }
+  if (cur.length) parts.push(cur.join('\n'));
+  return parts;
+}
+
+function condenseLines(events, { earlier } = {}) {
   const lines = [];
   if (earlier) lines.push(`[earlier] USER: ${clip(redact(earlier), 400)}`);
   let did = [];
@@ -169,7 +191,7 @@ export function condense(events, { earlier } = {}) {
     lines.push(`[${hhmm(e.ts)}] ${e.kind === 'user' ? 'USER' : 'CLAUDE'}: ${clip(redact(e.text), limit)}`);
   }
   flush();
-  return fit(lines);
+  return lines;
 }
 
 /** Keep a session under its share of the request: shorten Claude first, never his words until last. */

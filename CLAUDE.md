@@ -571,7 +571,15 @@ The rules it keeps, each tested (`pnpm test:sessions`, and the door in `test:ai`
 ```bash
 node scripts/sessions-to-tasks.mjs                       # dry run: what it would add, and the cost
 node scripts/sessions-to-tasks.mjs --since 2026-11-12T00:00:00Z   # dry run over a chosen window
+node scripts/sessions-to-tasks.mjs --backfill [--month 2026-06] [--apply]   # the past, once: oldest month first
 ```
+
+`--backfill` reads everything before the hourly window (`since` in the state file) a
+session-day at a time, splitting a long day into parts rather than cutting it, month
+by month from the oldest so a task opened in May and finished in June ends up done.
+Each task is dated when the work happened (`add --at <iso>`). Done once on
+2026-11-12, from the first session (24 May 2026); finished batches are recorded in
+`backfillDone`, so a rerun resumes rather than repeats.
 
 State, ledger (`imported.jsonl`) and `runs.log` live in
 `~/Library/Application Support/com.shawon.vault/session-import/`. A dry run never

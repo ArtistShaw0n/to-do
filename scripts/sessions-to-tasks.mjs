@@ -397,6 +397,12 @@ async function main() {
     if (!config) throw new Error('this Mac is not pointed at a hub (`todo sync`)');
 
     let state = readState() ?? { since: startOfToday(), files: {}, month: '', spent: 0 };
+    // Held off the hub until a time — e.g. its daily read allowance is nearly spent.
+    // Nothing is lost: the offsets do not move, so the next run reads it all.
+    if (APPLY && state.pauseUntil && new Date().toISOString() < state.pauseUntil) {
+      log(`paused until ${state.pauseUntil}`);
+      return;
+    }
     const month = dhakaDay().slice(0, 7);
     if (state.month !== month) { state.month = month; state.spent = 0; }
     if (APPLY && state.spent >= MONTHLY_CAP) {

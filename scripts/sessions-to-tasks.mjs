@@ -63,7 +63,9 @@ const costOf = (u) => {
 const KIND = ['bug', 'enhancement', 'release', 'design', 'frontend', 'backend', 'responsive',
   'architecture', 'requirements', 'billing', 'docs', 'test'];
 const MODULES = ['email', 'project-hub', 'hris', 'meet-chat', 'team-evaluation', 'shared-ui',
-  'property-booking', 'notification', 'portal'];
+  'property-booking', 'notification', 'portal',
+  // Envato Market's groups: one per marketplace.
+  'videohive', 'graphicriver', 'themeforest', 'codecanyon'];
 
 const say = (...m) => { if (!QUIET) console.log(...m); };
 const log = (msg) => {

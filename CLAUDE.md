@@ -116,6 +116,12 @@ Every task gets all of these. Both omissions below have been called out:
   | Property Booking System | `property-booking` |
   | Notification (cuts across modules) | `notification` |
 
+  **Envato Market** uses the same mechanism for its marketplaces: `videohive`,
+  `graphicriver`, `themeforest`, `codecanyon`. Other stock sites (Pond5, Freepik,
+  Adobe Stock, Shutterstock…) are their own project, **Stock Marketplaces**; Upwork
+  and Fiverr are **Freelancing**; the channel's videos are **Linearterra YouTube**;
+  the portfolio site is **shawon.art** (once called Artist Hub).
+
   Work belonging to the whole project rather than one module — the repo
   restructure, the design system, permissions, handover to testing — carries no
   module tag, which is correct.

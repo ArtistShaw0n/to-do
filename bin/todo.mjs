@@ -216,8 +216,8 @@ commands.add = (positional, flags) => {
  * The session importer used to run `add` once per task, and every run is a
  * connection that makes the hub read the whole vault: a few hundred tasks of
  * history cost millions of reads, which the free plan caps at five million a
- * day. Each entry is `{ "title": "...", "flags": { ...as add takes them } }` or
- * `{ "done": "<id>" }`. Prints the resulting ids as one JSON line at the end.
+ * day. Each entry is `{ "title": "...", "flags": { ...as add takes them } }`,
+ * `{ "done": "<id>" }` or `{ "edit": "<id>", "flags": { ...as edit takes them } }`. Prints the resulting ids as one JSON line at the end.
  */
 commands.import = (positional) => {
   const file = positional[0];
@@ -227,6 +227,7 @@ commands.import = (positional) => {
   const ids = [];
   for (const e of entries) {
     if (e.done) { commands.done([String(e.done)]); ids.push(String(e.done)); continue; }
+    if (e.edit) { commands.edit([String(e.edit)], e.flags ?? {}); ids.push(String(e.edit)); continue; }
     ids.push(commands.add([String(e.title)], e.flags ?? {}).id);
   }
   process.stdout.write(`IDS ${JSON.stringify(ids)}\n`);

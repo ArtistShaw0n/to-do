@@ -29,6 +29,8 @@ import { handleAi, dailyCap } from './aiRoutes';
 import { writeBrief, type BriefResult } from './brief';
 import { dayIn, safeZone } from './day';
 import { isConfigured } from './ai';
+import { budget } from './budget';
+export { AiBudget } from './budget';
 import { skipUnchangedWrites } from './storage';
 
 export type { Env };
@@ -45,7 +47,7 @@ export type { Env };
  * listing, which is the whole of the fix, and `test:ai` now restarts the hub with
  * a spent budget and checks the vault is still there.
  */
-const SQL_USAGE = 'CREATE TABLE IF NOT EXISTS ai_usage (day TEXT PRIMARY KEY, used INTEGER NOT NULL)';
+// (The counter now lives in its own object, `budget.ts`, so it never wakes the vault.)
 
 /** What an earlier version wrote into key-value storage, and must be cleared before the vault loads. */
 const LEGACY_KV_PREFIX = 'ai/';
@@ -78,7 +80,7 @@ export class TodoSync extends WsServerDurableObject<Env> {
    */
   async createPersister() {
     // An earlier version kept the day's counter as a key-value entry, which the
-    // vault's own loader cannot read (see SQL_USAGE). Any left behind are
+    // vault's own loader cannot read (see above). Any left behind are
     // removed *before* the load, or the load would fail on them once more.
     const legacy = [...(await this.ctx.storage.list({ prefix: LEGACY_KV_PREFIX })).keys()];
     if (legacy.length) await this.ctx.storage.delete(legacy);
@@ -86,33 +88,6 @@ export class TodoSync extends WsServerDurableObject<Env> {
     const store = createMergeableStore();
     this.store = store;
     return createDurableObjectStoragePersister(store, skipUnchangedWrites(this.ctx.storage));
-  }
-
-  // ── The day's AI budget ────────────────────────────────────────────────────
-
-  /**
-   * Spend one unit of the day's budget, or say there is none left.
-   *
-   * A Durable Object handles one thing at a time, so two calls cannot both read
-   * "149 of 150" and both go ahead — which is why the counter lives here and
-   * not in the Worker, where it would race.
-   */
-  async reserve(day: string, cap: number): Promise<{ ok: boolean; used: number }> {
-    const sql = this.ctx.storage.sql;
-    sql.exec(SQL_USAGE);
-
-    const row = sql.exec<{ used: number }>('SELECT used FROM ai_usage WHERE day = ?', day).toArray()[0];
-    const used = row ? Number(row.used) : 0;
-    if (used >= cap) return { ok: false, used };
-
-    // A new day: yesterday's counter has nothing left to say.
-    if (!row) sql.exec('DELETE FROM ai_usage WHERE day != ?', day);
-
-    sql.exec(
-      'INSERT INTO ai_usage (day, used) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET used = excluded.used',
-      day, used + 1,
-    );
-    return { ok: true, used: used + 1 };
   }
 
   // ── Recovery (see restore.ts) ──────────────────────────────────────────────
@@ -137,13 +112,6 @@ export class TodoSync extends WsServerDurableObject<Env> {
     this.ctx.abort('restore');
   }
 
-  async usedOn(day: string): Promise<number> {
-    const sql = this.ctx.storage.sql;
-    sql.exec(SQL_USAGE);
-    const row = sql.exec<{ used: number }>('SELECT used FROM ai_usage WHERE day = ?', day).toArray()[0];
-    return row ? Number(row.used) : 0;
-  }
-
   // ── The morning brief ──────────────────────────────────────────────────────
 
   /**
@@ -163,7 +131,7 @@ export class TodoSync extends WsServerDurableObject<Env> {
     return writeBrief(this.env, store, {
       tz,
       force,
-      reserve: async () => (await this.reserve(dayIn(tz), dailyCap(this.env))).ok,
+      reserve: async () => (await budget(this.env).reserve(dayIn(tz), dailyCap(this.env))).ok,
     });
   }
 }

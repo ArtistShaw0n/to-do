@@ -11,10 +11,19 @@ compatibility_date = "2026-09-01"
 name = "TODO_SYNC"
 class_name = "TodoSync"
 
+# The day's AI budget, apart from the vault so counting never wakes it (worker/budget.ts).
+[[durable_objects.bindings]]
+name = "AI_BUDGET"
+class_name = "AiBudget"
+
 # Durable Objects have to be declared in a migration before they can be used.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TodoSync"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["AiBudget"]
 
 # The Worker serves the app as well as syncing it, so the phones need no
 # separate hosting: one deployment, one address, one thing to keep alive.

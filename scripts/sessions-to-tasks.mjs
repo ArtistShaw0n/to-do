@@ -32,6 +32,7 @@ const SINCE_ARG = args.includes('--since') ? args[args.indexOf('--since') + 1] :
 const QUIET = args.includes('--quiet');
 const BACKFILL = args.includes('--backfill');
 const MONTH_ARG = args.includes('--month') ? args[args.indexOf('--month') + 1] : undefined;
+const HOLD = args.includes('--hold');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -41,6 +42,7 @@ const STATE_DIR = process.env.VAULT_SESSIONS_STATE_DIR
 const STATE = join(STATE_DIR, 'state.json');
 const LEDGER = join(STATE_DIR, 'imported.jsonl');
 const LOCK = join(STATE_DIR, 'lock');
+const HELD = join(STATE_DIR, 'held.json');
 const MONTHLY_CAP = Number(process.env.VAULT_SESSIONS_MONTHLY_CAP) || 50;
 const BATCH_CHARS = 220_000;
 
@@ -301,6 +303,16 @@ function pastUnits(until) {
  */
 async function backfill(config, state, { limit = Infinity } = {}) {
   let ran = 0;
+  // --hold: ask Claude now, keep the answers on this Mac, write them later in one go —
+  // for when the hub's reads for the day are spent but the API is not. The list it
+  // checks against is read once, and grows with what it has decided so far.
+  const held = HOLD ? readHeld() : null;
+  let snapshot = null;
+  if (HOLD) {
+    if (!(await openSession({ quiet: true }))) throw new Error('could not reach the hub; stopped');
+    snapshot = loadVault();
+    await closeSession();
+  }
   const until = state.since;
   const units = pastUnits(until).filter((u) => !MONTH_ARG || u.day.startsWith(MONTH_ARG));
   const months = [...new Set(units.map((u) => u.day.slice(0, 7)))];
@@ -311,21 +323,28 @@ async function backfill(config, state, { limit = Infinity } = {}) {
   for (const month of months) {
     // A month is finished as a whole: its batches are cut afresh each run, so
     // their numbers only mean something inside one run.
-    if (APPLY && state.backfillDone.includes(month)) continue;
+    if ((APPLY || HOLD) && state.backfillDone.includes(month)) continue;
     let ref = 0;
     const monthUnits = units.filter((u) => u.day.startsWith(month)).map((u) => ({ ...u, ref: `s${++ref}` }));
     for (const [gi, group] of batches(monthUnits).entries()) {
       const key = `${month}#${gi}`;
-      if (APPLY && state.backfillDone.includes(key)) continue;
+      if ((APPLY || HOLD) && state.backfillDone.includes(key)) continue;
+      if (HOLD && held.keys.includes(key)) continue;
       if (ran >= limit) { log(`backfill paused after ${ran} batches; continues next hour`); return false; }
       ran += 1;
       if (APPLY && state.spent >= MONTHLY_CAP) throw new Error(`stopped at ${key}: this month's ceiling of $${MONTHLY_CAP} is spent`);
 
-      if (!(await openSession({ quiet: true }))) throw new Error('could not reach the hub; stopped');
-      const vault = loadVault();
-      await closeSession();
-      const open = vault.tasks.filter((t) => !['done', 'cancelled'].includes(t.status));
-      const done = vault.tasks.filter((t) => t.status === 'done')
+      let vault = snapshot;
+      if (!HOLD) {
+        if (!(await openSession({ quiet: true }))) throw new Error('could not reach the hub; stopped');
+        vault = loadVault();
+        await closeSession();
+      }
+      const pendingTasks = HOLD ? held.items.filter((h) => h.pid).map((h) => ({
+        id: h.pid, title: h.title, status: h.status, project: h.project, tags: h.tags, completedAt: h.at,
+      })) : [];
+      const open = [...vault.tasks, ...pendingTasks].filter((t) => !['done', 'cancelled'].includes(t.status));
+      const done = [...vault.tasks, ...pendingTasks].filter((t) => t.status === 'done')
         .sort((a, b) => ((b.completedAt ?? '') < (a.completedAt ?? '') ? -1 : 1));
       const existing = [...open, ...done].slice(0, 400)
         .map((t) => ({ id: t.id, title: t.title, status: t.status, project: t.project, tags: t.tags }));
@@ -342,8 +361,9 @@ async function backfill(config, state, { limit = Infinity } = {}) {
       const cost = costOf(usage);
       totals.calls += 1;
       totals.cost += cost;
+      const ours = [...(state.imported ?? []), ...(HOLD ? held.items.filter((h) => h.pid).map((h) => h.pid) : [])];
       const { accepted, refused } = vet(reply.items, existing, group, projects,
-        state.allowNewProjects ?? [], state.imported ?? [], state.projectAliases ?? {});
+        state.allowNewProjects ?? [], ours, state.projectAliases ?? {});
       totals.refused += refused.length;
       totals.silent += group.filter((u) => /\] USER: /.test(u.log) && !reply.items.some((i) => i.session === u.ref)).length;
       for (const it of accepted) {
@@ -354,6 +374,26 @@ async function backfill(config, state, { limit = Infinity } = {}) {
       }
       say(`  ${key}: ${group.length} session-days, ${group.reduce((n, u) => n + u.log.length, 0)} chars, $${cost.toFixed(3)} → `
         + `${accepted.length} accepted, ${refused.length} refused. ${reply.seen}`);
+      if (HOLD) {
+        for (const it of accepted) {
+          if (it.action === 'complete') {
+            const mine = held.items.find((h) => h.pid === it.task.id);
+            if (mine) { mine.status = 'done'; mine.doneAt = it.session?.ended; } else held.items.push({ done: it.task.id });
+            continue;
+          }
+          held.items.push({
+            pid: `p${held.items.length + 1}`, title: it.title, status: it.status, project: it.project, tags: it.tags,
+            notes: it.notes, due: it.due, priority: it.priority, evidence: it.evidence, at: it.session?.ended,
+            day: it.session?.day,
+          });
+        }
+        held.keys.push(key);
+        held.cost += cost;
+        state.spent += cost;
+        writeHeld(held);
+        writeState(state);
+        continue;
+      }
       if (!APPLY) {
         for (const it of accepted) say(`      ${it.action === 'complete' ? '✓ complete' : `+ ${it.status}`} ${it.title}  {${it.project ?? (it.held ? `(${it.held}?)` : '—')} · ${it.tags.join(',')}}  [${it.session?.day}]`);
         continue;
@@ -370,14 +410,67 @@ async function backfill(config, state, { limit = Infinity } = {}) {
       writeState(state);
     }
     if (APPLY) { state.backfillDone.push(month); writeState(state); }
+    if (HOLD) { held.months = [...new Set([...(held.months ?? []), month])]; writeHeld(held); }
   }
-  const held = [...totals.held].map(([p, n]) => `${p} (${n})`).join(', ');
+  const heldProjects = [...totals.held].map(([p, n]) => `${p} (${n})`).join(', ');
   const verdict = `${APPLY ? 'backfill' : 'backfill dry'}: ${totals.calls} calls, $${totals.cost.toFixed(2)}, `
     + `${totals.added} open + ${totals.done} done added, ${totals.completed} closed, ${totals.refused} refused, `
-    + `${totals.silent} session-days gave nothing${held ? `; held projects: ${held}` : ''}`;
+    + `${totals.silent} session-days gave nothing${heldProjects ? `; held projects: ${heldProjects}` : ''}`;
   log(verdict);
   say(`\n${verdict}`);
   if (APPLY) { state.backfillPending = false; writeState(state); }
+  if (HOLD) say(`Held on this Mac: ${held.items.length} entries from ${held.keys.length} batches, to be written after the hub's reset.`);
+  return true;
+}
+
+// ── Answers held on this Mac ─────────────────────────────────────────────────
+
+function readHeld() {
+  try { return JSON.parse(readFileSync(HELD, 'utf8')); } catch { return { items: [], keys: [], months: [], cost: 0 }; }
+}
+
+function writeHeld(held) {
+  mkdirSync(STATE_DIR, { recursive: true });
+  const tmp = `${HELD}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(held));
+  renameSync(tmp, HELD);
+}
+
+/** Write everything held, in one CLI call — one connection to the hub. */
+function applyHeld(state) {
+  if (!existsSync(HELD)) return false;
+  const held = readHeld();
+  if (!held.items.length && !held.keys.length) return false;
+  const entries = held.items.map((h) => {
+    if (h.done) return { done: h.done };
+    const flags = { p: String(h.priority ?? 2) };
+    if (h.at) flags.at = h.status === 'done' && h.doneAt ? h.doneAt : h.at;
+    if (h.project) flags.project = h.project;
+    if (h.tags?.length) flags.tag = h.tags.join(',');
+    if (h.notes) flags.notes = h.notes;
+    if (h.due) flags.due = h.due;
+    if (h.evidence) flags.raw = h.evidence;
+    if (h.status === 'done') flags.status = 'done';
+    return { title: h.title, flags };
+  });
+  const file = join(STATE_DIR, `held-${process.pid}.json`);
+  writeFileSync(file, JSON.stringify(entries));
+  let ids;
+  try {
+    const out = cli(['import', file]);
+    ids = JSON.parse(out.match(/^IDS (.*)$/m)?.[1] ?? 'null');
+  } finally {
+    try { unlinkSync(file); } catch { /* gone */ }
+  }
+  if (!Array.isArray(ids) || ids.length !== entries.length) throw new Error('writing the held entries did not report every id');
+  held.items.forEach((h, i) => {
+    if (!h.done) state.imported = [...(state.imported ?? []), ids[i]].slice(-5000);
+    appendFileSync(LEDGER, `${JSON.stringify({ at: new Date().toISOString(), held: true, id: ids[i], action: h.done ? 'complete' : 'add', status: h.status, title: h.title, project: h.project, day: h.day })}\n`);
+  });
+  state.backfillDone = [...new Set([...(state.backfillDone ?? []), ...held.keys, ...(held.months ?? [])])];
+  writeState(state);
+  renameSync(HELD, `${HELD}.written-${Date.now()}`);
+  log(`held: wrote ${entries.length} entries in one call`);
   return true;
 }
 
@@ -385,6 +478,7 @@ async function backfill(config, state, { limit = Infinity } = {}) {
 async function continueBackfill(config, state) {
   if (!APPLY || !state.backfillPending) return;
   if (state.backfillResumeAfter && new Date().toISOString() < state.backfillResumeAfter) return;
+  applyHeld(state);
   await backfill(config, state, { limit: Number(process.env.VAULT_BACKFILL_PER_RUN) || 6 });
 }
 
@@ -399,6 +493,7 @@ async function main() {
     let state = readState() ?? { since: startOfToday(), files: {}, month: '', spent: 0 };
     // Held off the hub until a time — e.g. its daily read allowance is nearly spent.
     // Nothing is lost: the offsets do not move, so the next run reads it all.
+    if (BACKFILL && HOLD) { await backfill(config, state); return; }
     if (APPLY && state.pauseUntil && new Date().toISOString() < state.pauseUntil) {
       log(`paused until ${state.pauseUntil}`);
       return;

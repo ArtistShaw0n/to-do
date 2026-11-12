@@ -17,6 +17,7 @@ import type { TodoSync } from './index';
 import { secretsMatch } from './secret';
 import { AiError, checkKey, complete, completeWithUsage, DEFAULT_MODEL, isConfigured, parseJson, type AiFailure } from './ai';
 import { dayIn, safeZone } from './day';
+import { budget } from './budget';
 import {
   ASK_SYSTEM, IMAGE_SCHEMA, IMAGE_SYSTEM, SESSIONS_SCHEMA, SESSIONS_SYSTEM, STEPS_SCHEMA, STEPS_SYSTEM,
   askUser, imageUser, sessionsUser, stepsUser, type ExistingTask, type SessionLog, type TaskLike,
@@ -149,7 +150,7 @@ export async function handleAi(request: Request, env: Env, parts: string[]): Pro
   const cap = dailyCap(env);
 
   if (route === 'status' && request.method === 'GET') {
-    const used = isConfigured(env) ? await hub(env).usedOn(today) : 0;
+    const used = isConfigured(env) ? await budget(env).usedOn(today) : 0;
     return json({
       configured: isConfigured(env),
       model: env.AI_MODEL?.trim() || DEFAULT_MODEL,
@@ -189,7 +190,7 @@ export async function handleAi(request: Request, env: Env, parts: string[]): Pro
 /** Spend one unit of today's budget before anything is sent. */
 async function spend(env: Env, today: string, cap: number): Promise<void> {
   if (!isConfigured(env)) throw new AiError('not_configured', 'no API key on the hub');
-  if (!(await hub(env).reserve(today, cap)).ok) throw new AiError('capped', 'the daily ceiling is reached');
+  if (!(await budget(env).reserve(today, cap)).ok) throw new AiError('capped', 'the daily ceiling is reached');
 }
 
 async function normalise(request: Request, env: Env, today: string, cap: number) {

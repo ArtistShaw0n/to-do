@@ -1,12 +1,15 @@
 /** What the hub is configured with. Secrets are set with `wrangler secret put`. */
 
 import type { WsServerDurableObject } from 'tinybase/synchronizers/synchronizer-ws-server-durable-object';
+import type { AiBudget } from './budget';
 
 export interface Env {
   // Typed as the base class, not TodoSync: the routing helper only needs the
   // contract TinyBase defines, and the narrower type is not assignable to it.
   // wrangler.toml is what binds this name to the concrete class.
   TODO_SYNC: DurableObjectNamespace<WsServerDurableObject>;
+  /** The day's AI budget, kept apart from the vault so counting does not wake it (see budget.ts). */
+  AI_BUDGET: DurableObjectNamespace<AiBudget>;
   /** The built app. The Worker serves it so the phones need no separate host. */
   ASSETS: Fetcher;
   /** The shared secret every client must present. Set with `wrangler secret`. */

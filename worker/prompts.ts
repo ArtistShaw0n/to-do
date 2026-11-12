@@ -254,11 +254,12 @@ Reply with ONE JSON object and nothing else: {"seen": string, "items": [ ... ]}
 Each item:
 {"action": "add"|"complete", "existing": string|null, "status": "todo"|"done", "title": string, "project": string|null, "tags": string[], "notes": string|null, "due": "YYYY-MM-DD"|null, "priority": 0|1|2|3, "session": string, "evidence": string}
 - "session" is the ref of the session it came from (s1, s2, …).
-- "evidence" is the user's own words that asked for this work, copied exactly as written (Banglish stays Banglish), at most 150 characters. It is shown under the task, so pick the message that states the request plainly; never one whose point is anger, swearing or an insult — choose another of their messages about the same work.
+- "evidence" is the user's own words that asked for this work, copied exactly as written (Banglish stays Banglish), at most 150 characters. It is shown under the task, so pick the message that states the request plainly; never one whose point is anger, swearing or an insult, and never a bare status check or one-word reply ("?", "cholche?", "ok", "koro") — choose the message where they asked for this work. If the request came before these logs, use the [earlier] line.
 
 What counts as a task:
 - Every piece of work the user asked Claude for: building, fixing, changing, designing, writing, researching, deciding, setting up. A question that Claude answered with real research or analysis counts as done work ("Compare X and Y"). Greetings, thanks, small talk and clarifying back-and-forth do not.
 - One task per goal the user had — not per file, tool call or message. Follow-ups that refine the same goal ("ar ektu boro koro", "eta thik hoyni, abar koro") belong to that one task.
+- These logs often pick up in the middle of work. A step, fix or follow-up of a goal that is already in the existing list is not a new task: return nothing for it — or, once the log shows that goal finished, complete that existing task. Only a goal the existing list does not have yet becomes a new task.
 - "done" when the log shows it finished: Claude reported it done, a commit or deploy happened, or the user accepted it and moved on. "todo" when it was asked for but not finished, left for later, blocked, or the user said they would do it themselves.
 - If the work finished a task that is in the existing list and not yet done: {"action": "complete", "existing": <its id>}, with that task's title. If the work matches an existing task that is still unfinished, or one already done, return nothing for it. Never add a second copy of a task.
 - "add" items have "existing": null.

@@ -172,7 +172,7 @@ async function ask(config, payload) {
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 /** Everything the model said, sorted into what will be done and what was refused, and why. */
-function vet(items, existing, sessions, projects, allowNew, ours) {
+function vet(items, existing, sessions, projects, allowNew, ours, aliases = {}) {
   const byId = new Map(existing.map((t) => [t.id, t]));
   const known = new Map(projects.map((p) => [p.toLowerCase(), p]));
   const titles = new Set(existing.map((t) => norm(t.title)));
@@ -202,7 +202,9 @@ function vet(items, existing, sessions, projects, allowNew, ours) {
     const tags = it.tags.filter((t) => KIND.includes(t) || MODULES.includes(t))
       .filter((t) => !(it.status === 'done' && t === 'bug'));
     titles.add(norm(it.title));
-    let project = it.project ? known.get(it.project.toLowerCase()) ?? it.project : null;
+    // A folder's name is not always the project's: the To-Do repo is the Vault app.
+    const named = it.project ? aliases[it.project] ?? it.project : null;
+    let project = named ? known.get(named.toLowerCase()) ?? named : null;
     let held;
     if (project && !known.has(project.toLowerCase()) && !allowNew.includes(project)) {
       held = project; // a new project is his call: filed with none until he says yes
@@ -287,7 +289,7 @@ async function main() {
       report.tokens[1] += usage.outputTokens;
       report.cost += costOf(usage);
       report.seen.push(reply.seen);
-      const { accepted, refused } = vet(reply.items, existing, group, projects, state.allowNewProjects ?? [], state.imported ?? []);
+      const { accepted, refused } = vet(reply.items, existing, group, projects, state.allowNewProjects ?? [], state.imported ?? [], state.projectAliases ?? {});
       // Every session with a request should account for at least one item.
       for (const s of group) {
         if (/\] USER: /.test(s.log) && !reply.items.some((i) => i.session === s.ref)) report.silent.push(s);

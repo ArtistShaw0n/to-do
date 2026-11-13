@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { NOTE_KIND_META, type Note, type Task } from './lib/types';
-import { isOverdue, longDate, relativeDue, todayISO } from './lib/dates';
+import { entered, enteredLong, isOverdue, longDate, relativeDue, todayISO } from './lib/dates';
 import {
   PERSONAL, addNote, addTask, deleteNote, deleteTask, groupByCategory, groupByModule,
   isOpen, newId, projectColor, searchNotes, searchTasks, sortNotes, sortTasks, toggleDone,
@@ -992,7 +992,20 @@ function TaskCard({
         {bug && task.severity && !done && (
           <span className="sev" data-sev={task.severity}>{task.severity}</span>
         )}
-        {due && !done && <span className="card-due" data-late={late}>{due}</span>}
+        {/* Due date above, the moment below: the list reaches back months, so
+            the order alone no longer says which entry is which. A finished task
+            shows when it was finished — that is what a Done list is read for;
+            everything else shows when it was written. The tooltip has both. */}
+        <div className="card-when">
+          {due && !done && <span className="card-due" data-late={late}>{due}</span>}
+          <span
+            className="card-added"
+            title={`Added ${enteredLong(task.createdAt)}`
+              + (task.completedAt ? ` · Done ${enteredLong(task.completedAt)}` : '')}
+          >
+            {entered(done ? task.completedAt ?? task.createdAt : task.createdAt)}
+          </span>
+        </div>
       </div>
 
       {open && (

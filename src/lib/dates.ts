@@ -32,6 +32,36 @@ export function relativeDue(due: string | undefined, today = todayISO()): string
   return new Date(`${due}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+/**
+ * When an entry was made, in the shape a mail app uses: a time today, a day
+ * this week, a date before that.
+ *
+ * The list holds work going back months, so "which of these did I write just
+ * now?" is not answerable from the order alone — two tasks entered in May and
+ * this morning look identical. This is the answer, kept short enough to sit at
+ * the end of the row.
+ */
+export function entered(iso: string | undefined, now = new Date()): string {
+  if (!iso) return '';
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  const days = daysBetween(todayISO(at), todayISO(now));
+  if (days === 0) return at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  if (days === 1) return 'Yesterday';
+  if (days < 7 && days > 0) return at.toLocaleDateString(undefined, { weekday: 'short' });
+  const sameYear = at.getFullYear() === now.getFullYear();
+  return at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: '2-digit' }) });
+}
+
+/** The same moment in full, for a tooltip or the detail pane. */
+export function enteredLong(iso: string | undefined): string {
+  if (!iso) return '';
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? '' : at.toLocaleString(undefined, {
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 export function isOverdue(due: string | undefined, today = todayISO()): boolean {
   return Boolean(due && due < today);
 }

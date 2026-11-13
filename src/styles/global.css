@@ -531,6 +531,23 @@ body {
   margin-top: var(--s-2);
 }
 
+.card-when {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+/** When the task was written down. Quieter than the due date beside it. */
+.card-added {
+  font-size: var(--t-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
 .card-due {
   flex: none;
   margin-top: 1px;

@@ -4,7 +4,7 @@ import {
   type Note, type NoteKind, type Severity, type Task, type Vault,
 } from '../lib/types';
 import { checkReport, isBug, moveBug } from '../lib/bugs';
-import { relativeDue } from '../lib/dates';
+import { enteredLong, relativeDue } from '../lib/dates';
 import { projectColor } from '../lib/vault';
 import { NoteGlyph } from './glyphs';
 import { Steps } from './Steps';
@@ -189,7 +189,10 @@ export function TaskDetail({
           {confirmDelete ? 'Really delete?' : 'Delete'}
         </button>
         <div style={{ flex: 1 }} />
-        <span className="detail-hint">added {new Date(task.createdAt).toLocaleDateString()}</span>
+        <span className="detail-hint">
+          added {enteredLong(task.createdAt)}
+          {task.completedAt && ` · done ${enteredLong(task.completedAt)}`}
+        </span>
       </div>
     </div>
   );
@@ -339,7 +342,7 @@ export function NoteDetail({
           {confirmDelete ? 'Really delete?' : 'Delete'}
         </button>
         <div style={{ flex: 1 }} />
-        <span className="detail-hint">added {new Date(note.createdAt).toLocaleDateString()}</span>
+        <span className="detail-hint">added {enteredLong(note.createdAt)}</span>
       </div>
     </div>
   );

@@ -37,6 +37,8 @@ export interface SyncConfig {
   /** e.g. `wss://todo-sync.<subdomain>.workers.dev` */
   url: string;
   key: string;
+  /** Set when the key came from signing in to an account (see account.ts). */
+  email?: string;
 }
 
 export type SyncState = 'off' | 'connecting' | 'online' | 'offline';
@@ -47,7 +49,7 @@ export function readSyncConfig(): SyncConfig | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<SyncConfig>;
     if (!parsed.url || !parsed.key) return null;
-    return { url: parsed.url, key: parsed.key };
+    return { url: parsed.url, key: parsed.key, ...(parsed.email ? { email: parsed.email } : {}) };
   } catch {
     return null;
   }

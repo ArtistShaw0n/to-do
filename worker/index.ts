@@ -24,12 +24,14 @@ import {
   WsServerDurableObject,
 } from 'tinybase/synchronizers/synchronizer-ws-server-durable-object';
 import type { Env } from './env';
-import { secretsMatch } from './secret';
-import { handleAi, dailyCap } from './aiRoutes';
+import { handleAi } from './aiRoutes';
+import { handleAccount } from './accountRoutes';
+import { accounts, authorize, type Who } from './accounts';
+export { Accounts } from './accounts';
 import { writeBrief, type BriefResult } from './brief';
 import { dayIn, safeZone } from './day';
 import { isConfigured } from './ai';
-import { budget } from './budget';
+import { reserveFor } from './budget';
 export { AiBudget } from './budget';
 import { skipUnchangedWrites } from './storage';
 
@@ -112,18 +114,25 @@ export class TodoSync extends WsServerDurableObject<Env> {
     this.ctx.abort('restore');
   }
 
+  /** Empty this vault for good: its account has been closed. Never called for the owner's. */
+  async wipe(): Promise<void> {
+    await this.ctx.storage.deleteAll();
+    this.ctx.abort('account closed');
+  }
+
   // ── The morning brief ──────────────────────────────────────────────────────
 
   /**
    * Write today's brief. One at a time: the morning job and an app opening at
    * the same moment would otherwise both ask Claude and both be charged.
    */
-  makeBrief(opts: { force: boolean }): Promise<BriefResult> {
-    this.briefing ??= this.runBrief(opts.force).finally(() => { this.briefing = undefined; });
+  makeBrief(opts: { force: boolean; who?: { id: string; owner: boolean } }): Promise<BriefResult> {
+    const who = opts.who ?? { id: 'owner', owner: true };
+    this.briefing ??= this.runBrief(opts.force, who).finally(() => { this.briefing = undefined; });
     return this.briefing;
   }
 
-  private async runBrief(force: boolean): Promise<BriefResult> {
+  private async runBrief(force: boolean, who: { id: string; owner: boolean }): Promise<BriefResult> {
     const tz = safeZone(this.env.TIMEZONE);
     const store = this.store;
     if (!store) return { status: 'failed', date: dayIn(tz), reason: 'no_store' };
@@ -131,7 +140,7 @@ export class TodoSync extends WsServerDurableObject<Env> {
     return writeBrief(this.env, store, {
       tz,
       force,
-      reserve: async () => (await budget(this.env).reserve(dayIn(tz), dailyCap(this.env))).ok,
+      reserve: () => reserveFor(this.env, who, dayIn(tz)),
     });
   }
 }
@@ -158,6 +167,7 @@ export default {
 
     // Claude's doors. These *can* carry the key in a header, so they do.
     if (parts[0] === 'ai') return handleAi(request, env, parts);
+    if (parts[0] === 'account') return handleAccount(request, env, parts);
 
 
     if (parts[0] !== 'sync') {
@@ -167,7 +177,8 @@ export default {
     if (parts.length !== 2) {
       return new Response('not found', { status: 404 });
     }
-    if (!env.SYNC_KEY || !secretsMatch(parts[1], env.SYNC_KEY)) {
+    // The owner's key, or an account's own (see accounts.ts). Each names its own vault.
+    if (!(await authorize(env, parts[1]))) {
       return new Response('forbidden', { status: 403 });
     }
 
@@ -184,12 +195,22 @@ export default {
    * key — the hub is for syncing first, and a missing key is not an error.
    */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    if (!isConfigured(env) || !env.SYNC_KEY) return;
-    const stub = env.TODO_SYNC.get(env.TODO_SYNC.idFromName(`sync/${env.SYNC_KEY}`)) as unknown as DurableObjectStub<TodoSync>;
-    ctx.waitUntil(
-      stub.makeBrief({ force: false })
-        .then((r) => console.log(`[brief] ${r.status}${r.reason ? ` (${r.reason})` : ''}`))
-        .catch(() => console.error('[brief] crashed')),
-    );
+    if (!isConfigured(env)) return;
+    const vault = (key: string) =>
+      env.TODO_SYNC.get(env.TODO_SYNC.idFromName(`sync/${key}`)) as unknown as DurableObjectStub<TodoSync>;
+    const write = (who: Who, label: string) =>
+      vault(who.key).makeBrief({ force: false, who: { id: who.id, owner: who.owner } })
+        .then((r) => console.log(`[brief] ${label} ${r.status}${r.reason ? ` (${r.reason})` : ''}`))
+        .catch(() => console.error(`[brief] ${label} crashed`));
+
+    const jobs: Promise<void>[] = [];
+    if (env.SYNC_KEY) jobs.push(write({ id: 'owner', owner: true, key: env.SYNC_KEY }, 'owner'));
+    // Everyone else who has opened the app this week, one at a time: each is a
+    // separate call against their own budget, and none may hold up the owner's.
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    jobs.push((async () => {
+      for (const who of await accounts(env).active(since)) await write(who, 'account');
+    })().catch(() => console.error('[brief] could not list accounts')));
+    ctx.waitUntil(Promise.all(jobs));
   },
 };

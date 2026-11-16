@@ -28,6 +28,7 @@
     "test:writes": "vite build --config vite.test.config.ts --mode writes && node .test-out/writes.mjs",
     "test:sessions": "vite build --config vite.test.config.ts --mode sessions && node .test-out/sessions.mjs",
     "test:views": "vite build --config vite.test.config.ts --mode views && node .test-out/views.mjs",
+    "test:accounts": "vite build --config vite.test.config.ts --mode accounts && node .test-out/accounts.mjs",
     "update:mac": "node scripts/update-mac.mjs"
   },
   "dependencies": {

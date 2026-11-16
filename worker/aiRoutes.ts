@@ -14,10 +14,11 @@
 
 import type { Env } from './env';
 import type { TodoSync } from './index';
-import { secretsMatch } from './secret';
+import { authorize, type Who } from './accounts';
 import { AiError, checkKey, complete, completeWithUsage, DEFAULT_MODEL, isConfigured, parseJson, type AiFailure } from './ai';
 import { dayIn, safeZone } from './day';
-import { budget } from './budget';
+import { reserveFor, usageFor } from './budget';
+export { dailyCap } from './budget';
 import {
   ASK_SYSTEM, IMAGE_SCHEMA, IMAGE_SYSTEM, SESSIONS_SCHEMA, SESSIONS_SYSTEM, STEPS_SCHEMA, STEPS_SYSTEM,
   askUser, imageUser, sessionsUser, stepsUser, type ExistingTask, type SessionLog, type TaskLike,
@@ -127,13 +128,11 @@ function tasks(x: unknown, field: string, maxItems: number): TaskLike[] {
 // ── The hub's own state: the day's budget, and the store ─────────────────────
 
 /**
- * The same Durable Object the sockets reach. Its name is the path the clients
- * connect on — `sync/<key>` — because TinyBase's router names it that way.
+ * The same Durable Object this person's sockets reach. Its name is the path the
+ * clients connect on — `sync/<key>` — because TinyBase's router names it that way.
  */
-const hub = (env: Env) =>
-  env.TODO_SYNC.get(env.TODO_SYNC.idFromName(`sync/${env.SYNC_KEY}`)) as unknown as DurableObjectStub<TodoSync>;
-
-export const dailyCap = (env: Env) => Math.max(1, Number(env.AI_DAILY_CAP) || 150);
+const hub = (env: Env, who: Who) =>
+  env.TODO_SYNC.get(env.TODO_SYNC.idFromName(`sync/${who.key}`)) as unknown as DurableObjectStub<TodoSync>;
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 
@@ -142,15 +141,16 @@ export async function handleAi(request: Request, env: Env, parts: string[]): Pro
 
   const auth = request.headers.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!env.SYNC_KEY || !secretsMatch(token, env.SYNC_KEY)) return json({ error: 'forbidden' }, 403);
+  // The owner's key or an account's own; each spends from its own budget.
+  const who = await authorize(env, token);
+  if (!who) return json({ error: 'forbidden' }, 403);
 
   const route = parts.slice(1).join('/');
   const tz = safeZone(env.TIMEZONE);
   const today = dayIn(tz);
-  const cap = dailyCap(env);
 
   if (route === 'status' && request.method === 'GET') {
-    const used = isConfigured(env) ? await budget(env).usedOn(today) : 0;
+    const { used, cap } = isConfigured(env) ? await usageFor(env, who, today) : { used: 0, cap: 0 };
     return json({
       configured: isConfigured(env),
       model: env.AI_MODEL?.trim() || DEFAULT_MODEL,
@@ -161,18 +161,24 @@ export async function handleAi(request: Request, env: Env, parts: string[]): Pro
   }
 
   // Does the key actually work? Free: it asks the API whether the model exists.
-  if (route === 'check' && request.method === 'GET') return json(await checkKey(env));
+  if (route === 'check' && request.method === 'GET') {
+    if (!who.owner) return json({ error: 'forbidden' }, 403);
+    return json(await checkKey(env));
+  }
 
   if (request.method !== 'POST') return json({ error: 'not_found' }, 404);
 
   try {
     switch (route) {
-      case 'normalise': return await normalise(request, env, today, cap);
-      case 'steps': return await steps(request, env, today, cap);
-      case 'image': return await image(request, env, today, cap);
-      case 'ask': return await ask(request, env, today, cap);
-      case 'brief': return await brief(request, env);
-      case 'sessions': return await sessions(request, env, today, cap);
+      case 'normalise': return await normalise(request, env, today, who);
+      case 'steps': return await steps(request, env, today, who);
+      case 'image': return await image(request, env, today, who);
+      case 'ask': return await ask(request, env, today, who);
+      case 'brief': return await brief(request, env, who);
+      // Reading Claude Code sessions is the owner's own importer; nobody else's.
+      case 'sessions':
+        if (!who.owner) return json({ error: 'forbidden' }, 403);
+        return await sessions(request, env, today, who);
       default: return json({ error: 'not_found' }, 404);
     }
   } catch (err) {
@@ -188,12 +194,12 @@ export async function handleAi(request: Request, env: Env, parts: string[]): Pro
 }
 
 /** Spend one unit of today's budget before anything is sent. */
-async function spend(env: Env, today: string, cap: number): Promise<void> {
+async function spend(env: Env, today: string, who: Who): Promise<void> {
   if (!isConfigured(env)) throw new AiError('not_configured', 'no API key on the hub');
-  if (!(await budget(env).reserve(today, cap)).ok) throw new AiError('capped', 'the daily ceiling is reached');
+  if (!(await reserveFor(env, who, today))) throw new AiError('capped', 'the daily ceiling is reached');
 }
 
-async function normalise(request: Request, env: Env, today: string, cap: number) {
+async function normalise(request: Request, env: Env, today: string, who: Who) {
   const body = await readBody(request, 16_000);
   const raw = required(body.text, 'text', 2000);
   const ctx = {
@@ -202,7 +208,7 @@ async function normalise(request: Request, env: Env, today: string, cap: number)
     projects: list(body.projects, 'projects', 60, 80),
     raw,
   };
-  await spend(env, today, cap);
+  await spend(env, today, who);
 
   const reply = await complete(env, {
     system: normaliseSystem(),
@@ -217,7 +223,7 @@ async function normalise(request: Request, env: Env, today: string, cap: number)
   return json({ text: reply });
 }
 
-async function steps(request: Request, env: Env, today: string, cap: number) {
+async function steps(request: Request, env: Env, today: string, who: Who) {
   const body = await readBody(request, 8_000);
   const input = {
     title: required(body.title, 'title', 300),
@@ -226,7 +232,7 @@ async function steps(request: Request, env: Env, today: string, cap: number) {
     tags: list(body.tags, 'tags', 12, 40),
     existing: list(body.existing, 'existing', 30, 160),
   };
-  await spend(env, today, cap);
+  await spend(env, today, who);
 
   const reply = await complete(env, {
     system: STEPS_SYSTEM,
@@ -263,7 +269,7 @@ type ImageType = (typeof IMAGE_TYPES)[number];
  */
 const MAX_IMAGE_BASE64 = 1_600_000;
 
-async function image(request: Request, env: Env, today: string, cap: number) {
+async function image(request: Request, env: Env, today: string, who: Who) {
   const body = await readBody(request, MAX_IMAGE_BASE64 + 100_000);
   const img = body.image;
   if (!isObject(img)) throw new Bad('image is required');
@@ -279,7 +285,7 @@ async function image(request: Request, env: Env, today: string, cap: number) {
     projects: list(body.projects, 'projects', 60, 80),
     hint: text(body.hint, 'hint', 200),
   };
-  await spend(env, today, cap);
+  await spend(env, today, who);
 
   const reply = await complete(env, {
     system: IMAGE_SYSTEM,
@@ -303,7 +309,7 @@ async function image(request: Request, env: Env, today: string, cap: number) {
 const MAX_SESSIONS_CHARS = 260_000;
 const MAX_SESSIONS_BYTES = 1_000_000;
 
-async function sessions(request: Request, env: Env, today: string, cap: number) {
+async function sessions(request: Request, env: Env, today: string, who: Who) {
   // The ceiling on what is read is in bytes, and Bengali is three bytes a character.
   const body = await readBody(request, MAX_SESSIONS_BYTES);
   if (!Array.isArray(body.sessions) || !body.sessions.length) throw new Bad('sessions must be a non-empty list');
@@ -343,7 +349,7 @@ async function sessions(request: Request, env: Env, today: string, cap: number) 
     existing,
     sessions: logs,
   };
-  await spend(env, today, cap);
+  await spend(env, today, who);
 
   const { text: reply, usage } = await completeWithUsage(env, {
     system: SESSIONS_SYSTEM,
@@ -357,7 +363,7 @@ async function sessions(request: Request, env: Env, today: string, cap: number) 
   return json({ text: reply, usage });
 }
 
-async function ask(request: Request, env: Env, today: string, cap: number) {
+async function ask(request: Request, env: Env, today: string, who: Who) {
   const body = await readBody(request, 150_000);
   const input = {
     today: date(body.today, 'today'),
@@ -366,7 +372,7 @@ async function ask(request: Request, env: Env, today: string, cap: number) {
     open: tasks(body.open, 'open', 300),
     recent: tasks(body.recent, 'recent', 60),
   };
-  await spend(env, today, cap);
+  await spend(env, today, who);
 
   const answer = await complete(env, {
     system: ASK_SYSTEM,
@@ -377,9 +383,9 @@ async function ask(request: Request, env: Env, today: string, cap: number) {
   return json({ answer });
 }
 
-async function brief(request: Request, env: Env) {
+async function brief(request: Request, env: Env, who: Who) {
   if (!isConfigured(env)) throw new AiError('not_configured', 'no API key on the hub');
   const body = await readBody(request, 1_000);
-  const result = await hub(env).makeBrief({ force: body.force === true });
+  const result = await hub(env, who).makeBrief({ force: body.force === true, who: { id: who.id, owner: who.owner } });
   return json(result, result.status === 'failed' ? 502 : 200);
 }

@@ -6,6 +6,7 @@ import {
   seedSyncConfigFromHost, startLocalPersistence, startSync, type SyncState,
 } from './sync';
 import { startNormaliseWorker } from './normaliseWorker';
+import { takeBringFile } from './account';
 import { useAiStatus } from './ai';
 
 interface UseVault {
@@ -60,7 +61,10 @@ export function useVault(): UseVault {
         // nothing writes any more — but it sits in a MEGA folder, which macOS
         // treats as a removable volume, so opening it raises a permission
         // prompt on every single launch.
-        if (!readSyncConfig()) {
+        // Also once after a desktop app used on its own signs in to an account:
+        // its tasks are in the file, and they belong in the new vault. (The flag
+        // is only spent once there is an account to carry them into.)
+        if (!readSyncConfig() || takeBringFile()) {
           try {
             const { vault: fromFile } = await loadVault();
             migrateFromFile(fromFile);

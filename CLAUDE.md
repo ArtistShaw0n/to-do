@@ -579,6 +579,7 @@ pnpm test:ai                  # a real Worker + Durable Object against a stand-i
 pnpm test:writes              # TinyBase's persister vs counting storage: a wake rewrites nothing
 pnpm test:sessions            # reading session logs: offsets, what is kept, secrets scrubbed
 pnpm test:views               # Today, the Inbox and the week review: which task shows where
+pnpm test:accounts            # other people's accounts: each vault private, the owner's untouched, budgets apart
 node scripts/ai-smoke.mjs     # one real call per door, printed for a person to read
 node scripts/ai-eval.mjs      # his own history fed back through, to see if it lands where Claude Code did
 ```
@@ -586,6 +587,54 @@ node scripts/ai-eval.mjs      # his own history fed back through, to see if it l
 `test:ai` proves the plumbing and what is *left out* of every request; it cannot
 say how the model behaves on Banglish — that needs a key, which is what the other
 two are for.
+
+### More than one person: accounts
+
+Other people can use Vault too, each with a vault nobody else can reach. They get
+the app as a file (no App Store) and make an account with an email and a password.
+
+**How it works.** A vault was always addressed by its key: a socket on
+`/sync/<key>` reaches the Durable Object `sync/<key>`. An account is an email, a
+password hash (PBKDF2) and a long random key of its own (`u_…`), kept in SQL in
+the `Accounts` object (`worker/accounts.ts`), never in a vault's storage. Signing in
+hands the device that key, which goes into the same `todo.sync` config as ever; the
+rest of the app does not know the difference. `authorize()` accepts the owner's
+`SYNC_KEY` or an account's key, on the sockets and on `/ai/*` alike.
+
+**Shawon's vault does not move.** His `SYNC_KEY` still opens it, so his Macs, the
+CLI and the hourly import are untouched. He may give himself an account too: sign up
+with the hub key as the *claim* ("Other ways" on the first-run screen) and the
+account opens the same vault. That account cannot be closed from the app.
+
+**Money.** Each other account has `USER_AI_DAILY_CAP` calls a day (30), and all of
+them together `GUESTS_AI_DAILY_CAP` (150), from budgets of their own — they can never
+spend Shawon's `AI_DAILY_CAP`. The session importer's door and `/ai/check` are his
+alone. The morning brief is written for everyone who opened the app in the last
+seven days and has something open, each from their own budget. `MAX_ACCOUNTS` (100)
+caps sign-ups, and one address may open five accounts a day.
+
+**What it refuses.** Ten wrong passwords lock an email for fifteen minutes. A wrong
+password and an unknown email get the same answer, so the door cannot be used to
+find out who has an account. There is **no password reset by email** (no email
+service is wired in) — the sign-up screen says so.
+
+**Signing out removes the device's copy.** The local store merges into whichever
+vault it next connects to, so keeping it would hand one person's tasks to the next
+person who signs in on that device (`signOut` in `src/lib/account.ts`). Closing an
+account empties its vault on the hub for good.
+
+**The free plan is shared.** The 100,000 rows written and 5 million rows read a
+day (see *Waking the Durable Object…*) are for everyone together. With more than a
+couple of active people, move the hub to Workers Paid ($5/month) before they hit it.
+
+**Giving someone the app:**
+
+- Mac: `Vault_<version>_universal.dmg` from the GitHub release. It is not
+  notarised, so the first open is right-click → Open. It updates itself after that.
+- Windows: `Vault_<version>_x64-setup.exe`; SmartScreen asks once (More info → Run anyway).
+- Phone: open `https://vault.artist-shawon.workers.dev` and Add to Home Screen.
+
+`pnpm test:accounts` holds each of these as a named promise against a throwaway hub.
 
 ### Work done in Claude Code → tasks
 
@@ -651,6 +700,7 @@ moves the offsets. Measured on a real day: ~12 sessions, ~180 K characters, one 
 | `worker/index.ts` | the hub: routing, the Durable Object, the day's budget, the cron |
 | `worker/aiRoutes.ts`, `worker/ai.ts`, `worker/brief.ts` | Claude's doors, the one place that calls it, the morning brief |
 | `scripts/sessions-to-tasks.mjs`, `scripts/lib/sessions.mjs` | Claude Code sessions → tasks, hourly (see *Work done in Claude Code → tasks*) |
+| `worker/accounts.ts`, `worker/accountRoutes.ts`, `src/lib/account.ts` | accounts: who may sync, each with their own vault (see *More than one person*) |
 | `worker/storage.ts` | the persister's storage, wrapped so a wake does not rewrite the vault (see *Waking the Durable Object…*) |
 | `src/lib/prompts.ts`, `worker/prompts.ts` | what Claude is told |
 | `src/lib/ai.ts` | the app's side: knocks on the hub, knows whether it is switched on |

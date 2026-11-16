@@ -16,6 +16,11 @@ class_name = "TodoSync"
 name = "AI_BUDGET"
 class_name = "AiBudget"
 
+# Accounts: who may sync, each with a vault of their own (worker/accounts.ts).
+[[durable_objects.bindings]]
+name = "ACCOUNTS"
+class_name = "Accounts"
+
 # Durable Objects have to be declared in a migration before they can be used.
 [[migrations]]
 tag = "v1"
@@ -24,6 +29,10 @@ new_sqlite_classes = ["TodoSync"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["AiBudget"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["Accounts"]
 
 # The Worker serves the app as well as syncing it, so the phones need no
 # separate hosting: one deployment, one address, one thing to keep alive.
@@ -49,6 +58,12 @@ AI_MODEL = "claude-opus-5-5"
 AI_DAILY_CAP = "150"
 # Where "today" is, for the cap and for the brief.
 TIMEZONE = "Asia/Dhaka"
+# Other people's accounts: calls a day each, and for all of them together. They
+# come out of their own budgets, never the owner's AI_DAILY_CAP.
+USER_AI_DAILY_CAP = "30"
+GUESTS_AI_DAILY_CAP = "150"
+# How many accounts may be opened, the owner's not counted.
+MAX_ACCOUNTS = "100"
 
 [triggers]
 # 00:30 UTC is 06:30 in Dhaka (UTC+6): the brief is written before the day starts.

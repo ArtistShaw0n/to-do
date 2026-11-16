@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   deviceId, readSyncConfig, writeSyncConfig, type SyncConfig, type SyncState,
 } from '../lib/sync';
+import { ACCOUNT_MESSAGES, changePassword, closeAccount, isLocalOnly, markBringFile, setLocalOnly, signOut } from '../lib/account';
 
 /**
  * Everything that was previously unreachable.
@@ -91,6 +92,20 @@ export function Settings({
             ))}
           </div>
 
+          {config?.email ? (
+            <>
+              <div className="settings-heading">Account</div>
+              <AccountSection config={config} />
+            </>
+          ) : (
+          <>
+          {isLocalOnly() && (
+            <>
+              <div className="settings-heading">Account</div>
+              <div className="field-note">This computer is not signed in, so its tasks reach no other device.</div>
+              <button className="btn" onClick={() => { setLocalOnly(false); markBringFile(); location.reload(); }}>Sign in or create an account</button>
+            </>
+          )}
           <div className="settings-heading">Sync</div>
 
           <label className="detail-field">
@@ -150,6 +165,8 @@ export function Settings({
             Disconnecting leaves this device's own copy alone — the tasks stay
             here, they simply stop reaching the others.
           </div>
+          </>
+          )}
 
           <div className="settings-heading">This device</div>
           <div className="settings-row"><span>Name</span><code>{deviceId()}</code></div>
@@ -161,5 +178,70 @@ export function Settings({
         </div>
       </div>
     </main>
+  );
+}
+
+/**
+ * The account this device is signed in to. Signing out forgets this device's
+ * copy too (see `signOut`); closing the account empties its vault on the hub.
+ */
+function AccountSection({ config }: { config: SyncConfig }) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  const [closing, setClosing] = useState(false);
+  const [closePw, setClosePw] = useState('');
+
+  const savePassword = async () => {
+    const r = await changePassword(config, current, next);
+    if (!r.ok) { setNote({ text: ACCOUNT_MESSAGES[r.error], error: true }); return; }
+    setCurrent(''); setNext('');
+    setNote({ text: 'Password changed.', error: false });
+  };
+
+  const close = async () => {
+    const r = await closeAccount(config, closePw);
+    if (!r.ok) { setNote({ text: ACCOUNT_MESSAGES[r.error], error: true }); return; }
+    await signOut();
+  };
+
+  return (
+    <div className="settings-account">
+      <div className="settings-row"><span>Signed in as</span><code>{config.email}</code></div>
+      <button className="btn" onClick={() => void signOut()}>Sign out</button>
+      <div className="field-note">Signing out removes this device's copy. Your tasks stay in your account.</div>
+
+      <label className="detail-field">
+        <span>Current password</span>
+        <input className="detail-input" type="password" autoComplete="current-password"
+          value={current} onChange={(e) => setCurrent(e.target.value)} />
+      </label>
+      <label className="detail-field">
+        <span>New password</span>
+        <input className="detail-input" type="password" autoComplete="new-password"
+          value={next} onChange={(e) => setNext(e.target.value)} />
+      </label>
+      <button className="btn" disabled={!current || !next} onClick={() => void savePassword()}>Change password</button>
+
+      {!closing ? (
+        <button className="btn btn-danger" onClick={() => setClosing(true)}>Close account…</button>
+      ) : (
+        <>
+          <div className="field-note field-error">
+            This deletes every task and note in this account, on every device. It cannot be undone.
+          </div>
+          <label className="detail-field">
+            <span>Password to confirm</span>
+            <input className="detail-input" type="password" autoComplete="current-password"
+              value={closePw} onChange={(e) => setClosePw(e.target.value)} />
+          </label>
+          <div className="detail-inline">
+            <button className="btn btn-danger" disabled={!closePw} onClick={() => void close()}>Delete everything</button>
+            <button className="btn" onClick={() => { setClosing(false); setClosePw(''); }}>Keep my account</button>
+          </div>
+        </>
+      )}
+      {note && <div className={`field-note${note.error ? ' field-error' : ''}`} role="status">{note.text}</div>}
+    </div>
   );
 }

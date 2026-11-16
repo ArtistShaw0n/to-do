@@ -42,5 +42,41 @@ export class AiBudget extends DurableObject<Env> {
   }
 }
 
-/** The one budget object. Its name never changes, so every caller reaches the same counter. */
-export const budget = (env: Env) => env.AI_BUDGET.get(env.AI_BUDGET.idFromName('budget'));
+/**
+ * A budget by name. `budget` (the default) is the owner's and its name never
+ * changes, so every caller reaches the same counter; `guests` is shared by every
+ * other account, and `user/<id>` is one account's own.
+ */
+export const budget = (env: Env, name = 'budget') => env.AI_BUDGET.get(env.AI_BUDGET.idFromName(name));
+
+// ── Whose budget a call comes out of ─────────────────────────────────────────
+
+const cap = (raw: string | undefined, fallback: number) => Math.max(1, Number(raw) || fallback);
+
+export const dailyCap = (env: Env) => cap(env.AI_DAILY_CAP, 150);
+const userCap = (env: Env) => cap(env.USER_AI_DAILY_CAP, 30);
+const guestsCap = (env: Env) => cap(env.GUESTS_AI_DAILY_CAP, 150);
+
+export interface Spender { id: string; owner: boolean }
+
+/**
+ * Spend one call for this person. The owner spends from his own budget, as
+ * always. Anyone else spends from their own *and* from the pool all guests
+ * share, so no number of other accounts can ever spend the owner's day.
+ */
+export async function reserveFor(env: Env, who: Spender, day: string): Promise<boolean> {
+  if (who.owner) return (await budget(env).reserve(day, dailyCap(env))).ok;
+  if (!(await budget(env, `user/${who.id}`).reserve(day, userCap(env))).ok) return false;
+  return (await budget(env, 'guests').reserve(day, guestsCap(env))).ok;
+}
+
+/** What this person has used today, against their own ceiling. */
+export async function usageFor(env: Env, who: Spender, day: string): Promise<{ used: number; cap: number }> {
+  if (who.owner) return { used: await budget(env).usedOn(day), cap: dailyCap(env) };
+  const [mine, pool] = await Promise.all([
+    budget(env, `user/${who.id}`).usedOn(day),
+    budget(env, 'guests').usedOn(day),
+  ]);
+  // When the shared pool runs dry first, say so: report it as this person's ceiling reached.
+  return { used: pool >= guestsCap(env) ? userCap(env) : mine, cap: userCap(env) };
+}

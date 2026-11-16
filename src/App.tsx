@@ -17,6 +17,8 @@ import {
   CheckGlyph, ImageGlyph, NoteGlyph, SearchGlyph, SendGlyph, ViewGlyph, type ViewGlyphName,
 } from './components/glyphs';
 import { SyncBadge, SyncSetup, hasSyncConfig } from './components/SyncSetup';
+import { isLocalOnly } from './lib/account';
+import { seedSyncConfigFromHost } from './lib/sync';
 import { checkReport, isBug, sortBugs } from './lib/bugs';
 import { Answer, Brief } from './components/Brief';
 import {
@@ -75,7 +77,15 @@ export default function App() {
   // such file, so it has to be told once — and until it is, it has no vault to
   // show and nowhere to put anything typed into it.
   const inTauri = '__TAURI_INTERNALS__' in window;
-  const [configured] = useState(() => inTauri || !!hasSyncConfig());
+  // Signed in (or given a hub key), or a desktop app kept on its own machine.
+  // A desktop app with neither first asks the CLI's config file, which is how
+  // the owner's Macs have always found the hub; null while that is asked.
+  const [configured, setConfigured] = useState<boolean | null>(() =>
+    hasSyncConfig() || (inTauri && isLocalOnly()) ? true : inTauri ? null : false);
+  useEffect(() => {
+    if (configured !== null) return;
+    void seedSyncConfigFromHost().then(() => setConfigured(!!hasSyncConfig()));
+  }, [configured]);
   const [showSettings, setShowSettings] = useState(false);
 
   // The day's brief, shown once until it is dismissed. Tomorrow's arrives on
@@ -483,6 +493,7 @@ export default function App() {
       </div>
     );
   }
+  if (configured === null) return null;
   if (!configured) return <SyncSetup onDone={() => window.location.reload()} />;
   if (showSettings) {
     return (

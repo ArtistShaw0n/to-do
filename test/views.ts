@@ -6,6 +6,7 @@
 
 import { inboxTasks, isLive, todayReason, todayTasks, weekReview } from '../src/lib/views';
 import type { Task, Vault } from '../src/lib/types';
+import { groupByCategory } from '../src/lib/vault';
 
 const results: [string, boolean, string?][] = [];
 const check = (n: string, ok: boolean, d?: string) => results.push([n, ok, d]);
@@ -71,6 +72,15 @@ check('…and by day, today last', w.byDay[6].day === today && w.byDay[6].count 
 check('overdue and stuck are named, inbox counted, and inbox is not "open"',
   w.overdue.length === 1 && w.stuck.some((x) => x.title === 'forgotten') && w.inbox === 1 && w.open === 2,
   `overdue ${w.overdue.length} stuck ${w.stuck.length} inbox ${w.inbox} open ${w.open}`);
+
+// ── Done ─────────────────────────────────────────────────────────────────────
+
+check('Done puts the group that finished most recently first, not the biggest', (() => {
+  const old = Array.from({ length: 5 }, () => task({ status: 'done', project: 'OERP', completedAt: '2026-11-15T12:00:00.000Z' }));
+  const fresh = [task({ status: 'done', project: 'Envato Market', completedAt: '2026-11-16T09:00:00.000Z' })];
+  const order = groupByCategory([...old, ...fresh]).map((g) => g.label);
+  return order[0] === 'Envato Market' && order[1] === 'OERP';
+})());
 
 for (const [n, ok, d] of results) console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d ? `  — ${d}` : ''}`);
 const failed = results.filter(([, ok]) => !ok).length;

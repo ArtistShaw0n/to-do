@@ -199,8 +199,8 @@ The rules live in `src/lib/bugs.ts` and are shared by the app and the CLI.
 Two lists carry headings, both from `src/lib/vault.ts` and both returning the
 same `TaskGroup` shape so they cannot drift: **Bugs** by module
 (`groupByModule`), **Done** by category — Bugs, Personal, then each project
-(`groupByCategory`). Heaviest group first in both, and whatever has no home
-last. Every other view stays flat, because a tile already answered the question
+(`groupByCategory`). Bugs runs heaviest group first, whatever has no home last;
+Done runs from the most recently finished group down, so today's work is on top. Every other view stays flat, because a tile already answered the question
 there.
 
 Each module also gets one umbrella task tagged `release` + its module —

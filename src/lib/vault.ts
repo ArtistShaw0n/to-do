@@ -403,6 +403,9 @@ const byWeight = (a: TaskGroup, b: TaskGroup) =>
  * with nothing saying which is which. The headings are what the tile was doing
  * for the other views.
  *
+ * Groups run from the most recently finished to the longest quiet, so today's
+ * work is at the top whichever project it was in.
+ *
  * One bucket per task, first match winning. A closed bug belongs under Bugs
  * whatever project it came from, because being a bug is what it was worked on
  * as — filing it under OERP instead would hide it among the features.
@@ -422,7 +425,12 @@ export function groupByCategory(tasks: Task[]): TaskGroup[] {
     else put('unfiled', 'Unfiled', t);
   }
 
-  return [...buckets.values()].sort(byWeight);
+  // Whatever finished most recently comes first: the group that holds today's
+  // work belongs at the top, not the one with the longest history. (Sorting by
+  // size kept OERP's 390 above the day's ten for days on end.)
+  const latest = (g: TaskGroup) =>
+    g.tasks.reduce((m, t) => ((t.completedAt ?? t.updatedAt) > m ? (t.completedAt ?? t.updatedAt) : m), '');
+  return [...buckets.values()].sort((a, b) => latest(b).localeCompare(latest(a)) || byWeight(a, b));
 }
 
 export function projectColor(vault: Vault, name?: string): string {

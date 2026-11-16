@@ -319,19 +319,28 @@ export default function App() {
     }
   }, [theme]);
 
+  // Updates install themselves. A release is looked for at launch and every
+  // six hours after (a GitHub request, not the hub), then downloaded and
+  // installed in the background. It takes effect at the next start; a Restart
+  // button offers it sooner. The app never restarts on its own: a restart
+  // opens the window, and that would jump in front of whatever he is doing.
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return;
     let cancelled = false;
+    let installed = false;
 
-    void (async () => {
+    const tick = async () => {
+      if (installed) return;
       try {
         const { check } = await import('@tauri-apps/plugin-updater');
         const found = await check();
         if (!found || cancelled) return;
+        await found.downloadAndInstall();
+        installed = true;
+        if (cancelled) return;
         setUpdate({
           version: found.version,
           install: async () => {
-            await found.downloadAndInstall();
             const { relaunch } = await import('@tauri-apps/plugin-process');
             await relaunch();
           },
@@ -339,9 +348,14 @@ export default function App() {
       } catch {
         // Offline or no release yet — never block the app for this.
       }
-    })();
+    };
 
-    return () => { cancelled = true; };
+    void tick();
+    const every = window.setInterval(() => void tick(), 6 * 60 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(every);
+    };
   }, []);
 
   const counts = useMemo(() => {
@@ -962,8 +976,8 @@ export default function App() {
 
       {update && (
         <div className="toast">
-          Version {update.version} available
-          <button className="btn-update" onClick={() => void update.install()}>Update</button>
+          Version {update.version} is installed
+          <button className="btn-update" onClick={() => void update.install()}>Restart</button>
         </div>
       )}
     </>

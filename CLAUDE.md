@@ -724,10 +724,24 @@ Pushing the tag by name avoids the trap entirely.
 The tag push triggers `.github/workflows/release.yml`, which builds a universal
 binary, signs it, and publishes `latest.json`.
 
-`check()` runs once on mount in `src/App.tsx`, so an app that is already running
-will not notice — and closing the window only parks it in the menu bar. Shawon
-has to actually **quit** (tray → Quit, or ⌘Q) and reopen before the update toast
-appears.
+**Putting it on his Mac is your job, not his.** After every release, once the
+tag is pushed:
+
+```bash
+pnpm update:mac        # waits for the build, checks the signature, swaps the app, reopens it in the background
+```
+
+`scripts/update-mac.mjs` downloads the same signed bundle the in-app updater
+uses, verifies it against the public key in `tauri.conf.json` (it refuses
+anything else), quits the app politely, replaces `/Applications/Vault.app`
+(putting the old one back if the swap fails), and reopens it with `open -g` so it
+does not jump in front of his work. Tell him the version is in; don't ask him to
+quit and reopen. He asked for this on 2026-11-16 after an update never reached him.
+
+Every other Mac updates itself: the app looks for a release at launch and every
+six hours, installs it in the background, and shows a Restart button. It never
+restarts on its own — a restart opens the window over whatever he is doing — so
+an installed update otherwise takes effect at the next launch.
 
 **The version in `package.json`, `src-tauri/tauri.conf.json`,
 `src-tauri/Cargo.toml` and the git tag must all match**, or the updater will not

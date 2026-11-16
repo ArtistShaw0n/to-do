@@ -27,7 +27,8 @@
     "test:ai": "vite build --config vite.test.config.ts --mode ai && node .test-out/ai.mjs",
     "test:writes": "vite build --config vite.test.config.ts --mode writes && node .test-out/writes.mjs",
     "test:sessions": "vite build --config vite.test.config.ts --mode sessions && node .test-out/sessions.mjs",
-    "test:views": "vite build --config vite.test.config.ts --mode views && node .test-out/views.mjs"
+    "test:views": "vite build --config vite.test.config.ts --mode views && node .test-out/views.mjs",
+    "update:mac": "node scripts/update-mac.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

@@ -13,7 +13,7 @@
 
 import type { MergeableStore } from 'tinybase';
 import { storeToVault, TABLES } from '../src/lib/store';
-import { computeStats, isOpen } from '../src/lib/stats';
+import { computeStats, isCommitted } from '../src/lib/stats';
 import type { Task } from '../src/lib/types';
 import { AiError, complete, type AiEnv } from './ai';
 import { dayIn, daysBefore, weekdayIn } from './day';
@@ -86,7 +86,7 @@ export async function writeBrief(
   }
 
   const vault = storeToVault(store);
-  const open = vault.tasks.filter(isOpen).sort(byPressure);
+  const open = vault.tasks.filter(isCommitted).sort(byPressure);
   if (!open.length) return { status: 'skipped', date, reason: 'nothing_open' };
 
   if (!(await opts.reserve())) return { status: 'skipped', date, reason: 'capped' };

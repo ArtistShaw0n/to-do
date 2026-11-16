@@ -12,8 +12,12 @@ import { todayISO } from './dates';
 
 export const isOpen = (t: Task) => t.status !== 'done' && t.status !== 'cancelled';
 
+/** Open and taken on: an Inbox suggestion is open but not yet his work. */
+export const isCommitted = (t: Task) => isOpen(t) && t.status !== 'inbox';
+
 export function computeStats(vault: Vault, day = todayISO()): Stats {
-  const open = vault.tasks.filter(isOpen);
+  // The numbers count work he has taken on, not suggestions waiting in the Inbox.
+  const open = vault.tasks.filter(isCommitted);
   return {
     date: day,
     total: vault.tasks.length,

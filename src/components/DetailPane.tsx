@@ -4,7 +4,7 @@ import {
   type Note, type NoteKind, type Severity, type Task, type Vault,
 } from '../lib/types';
 import { checkReport, isBug, moveBug } from '../lib/bugs';
-import { enteredLong, relativeDue } from '../lib/dates';
+import { enteredLong, relativeDue, todayISO } from '../lib/dates';
 import { projectColor } from '../lib/vault';
 import { NoteGlyph } from './glyphs';
 import { Steps } from './Steps';
@@ -50,7 +50,7 @@ export function TaskDetail({
   const [project, setProject] = useState(task.project ?? '');
   const [tags, setTags] = useState(task.tags.join(', '));
   const [due, setDue] = useState(task.due ?? '');
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [scheduled, setScheduled] = useState(task.scheduled ?? '');
 
   // Reset every field when the selection moves, or the previous item's text
   // would linger in the form.
@@ -60,8 +60,8 @@ export function TaskDetail({
     setProject(task.project ?? '');
     setTags(task.tags.join(', '));
     setDue(task.due ?? '');
-    setConfirmDelete(false);
-  }, [task.id, task.title, task.notes, task.project, task.due, task.tags]);
+    setScheduled(task.scheduled ?? '');
+  }, [task.id, task.title, task.notes, task.project, task.due, task.scheduled, task.tags]);
 
   const done = task.status === 'done' || task.status === 'cancelled';
 
@@ -77,7 +77,17 @@ export function TaskDetail({
       project: project.trim() || undefined,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       due: due || undefined,
+      scheduled: scheduled || undefined,
     });
+  };
+
+  // One press puts it on Today, or takes it off again.
+  const today = todayISO();
+  const plannedToday = scheduled !== '' && scheduled <= today;
+  const togglePlan = () => {
+    const next = plannedToday ? '' : today;
+    setScheduled(next);
+    onPatch({ scheduled: next || undefined });
   };
 
   return (
@@ -160,6 +170,23 @@ export function TaskDetail({
             {due && <span className="detail-hint">{relativeDue(due)}</span>}
           </div>
         </label>
+
+        {/* When you mean to work on it — not the deadline above. Today lists both. */}
+        <label className="detail-field">
+          <span>Do on</span>
+          <div className="detail-inline">
+            <input
+              className="detail-input"
+              type="date"
+              value={scheduled}
+              onChange={(e) => setScheduled(e.target.value)}
+              onBlur={save}
+            />
+            <button type="button" className="btn" onClick={togglePlan}>
+              {plannedToday ? 'Not today' : 'Today'}
+            </button>
+          </div>
+        </label>
       </div>
 
       <Steps task={task} onPatch={onPatch} />
@@ -182,11 +209,8 @@ export function TaskDetail({
       {task.originalInput && <div className="detail-raw">“{task.originalInput}”</div>}
 
       <div className="detail-foot">
-        <button
-          className="btn btn-danger"
-          onClick={() => (confirmDelete ? onDelete() : setConfirmDelete(true))}
-        >
-          {confirmDelete ? 'Really delete?' : 'Delete'}
+        <button className="btn btn-danger" onClick={onDelete} title="Undo is offered for eight seconds">
+          Delete
         </button>
         <div style={{ flex: 1 }} />
         <span className="detail-hint">
@@ -216,7 +240,6 @@ export function NoteDetail({
   const [url, setUrl] = useState(note.url ?? '');
   const [body, setBody] = useState(note.body);
   const [reveal, setReveal] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     setKind(note.kind);
@@ -227,7 +250,6 @@ export function NoteDetail({
     setBody(note.body);
     // A revealed secret must not stay revealed when the selection moves on.
     setReveal(false);
-    setConfirmDelete(false);
   }, [note.id, note.kind, note.title, note.username, note.secret, note.url, note.body]);
 
   const save = (over: Partial<Note> = {}) => {
@@ -335,11 +357,8 @@ export function NoteDetail({
       </div>
 
       <div className="detail-foot">
-        <button
-          className="btn btn-danger"
-          onClick={() => (confirmDelete ? onDelete() : setConfirmDelete(true))}
-        >
-          {confirmDelete ? 'Really delete?' : 'Delete'}
+        <button className="btn btn-danger" onClick={onDelete} title="Undo is offered for eight seconds">
+          Delete
         </button>
         <div style={{ flex: 1 }} />
         <span className="detail-hint">added {enteredLong(note.createdAt)}</span>

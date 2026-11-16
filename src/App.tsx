@@ -30,21 +30,43 @@ import {
   applySealed, encryptValue, hasLock, lockNotes, revealNotes, sealPending, unlockedSecrets,
 } from './lib/lock';
 import { Settings } from './components/Settings';
+import { Review } from './components/Review';
+import { Palette, type Command } from './components/Palette';
+import { inboxTasks, isLive, todayTasks, weekReview } from './lib/views';
 
 type ThemeMode = 'system' | 'light' | 'dark';
 const THEME_ORDER: ThemeMode[] = ['system', 'light', 'dark'];
 
-type View = 'all' | 'personal' | 'bugs' | 'notes' | 'done';
+type View = 'today' | 'inbox' | 'all' | 'personal' | 'bugs' | 'notes' | 'done' | 'review';
 
 /** The project the Personal category filters to. */
 
 const CATEGORIES: { view: View; label: string; glyph: ViewGlyphName; color: string }[] = [
+  // Today first: the screen that answers "what now", and the one the app opens on.
+  { view: 'today', label: 'Today', glyph: 'today', color: 'var(--purple)' },
+  // Found in a Claude Code session, waiting for a yes before it joins the list.
+  { view: 'inbox', label: 'Inbox', glyph: 'inbox', color: 'var(--teal)' },
   { view: 'all', label: 'All', glyph: 'all', color: 'var(--blue)' },
   { view: 'personal', label: 'Personal', glyph: 'personal', color: 'var(--green)' },
   { view: 'bugs', label: 'Bugs', glyph: 'bugs', color: 'var(--pink)' },
   { view: 'notes', label: 'Notes', glyph: 'notes', color: 'var(--orange)' },
   { view: 'done', label: 'Done', glyph: 'done', color: 'var(--text-3)' },
+  { view: 'review', label: 'Week', glyph: 'review', color: 'var(--text-2)' },
 ];
+
+/** What an empty screen says — each one a different kind of nothing. */
+const EMPTY: Partial<Record<View, { title: string; body: string }>> = {
+  today: { title: 'Nothing planned for today', body: 'Open a task and choose Today, or add one below.' },
+  inbox: { title: 'Inbox is empty', body: 'Work found in your Claude Code sessions waits here for a yes.' },
+  done: { title: 'Nothing finished yet', body: 'Completed tasks collect here.' },
+};
+
+function focusComposer() {
+  document.querySelector<HTMLInputElement>('.composer-shell input:not([type=file])')?.focus();
+}
+
+/** Screens with no composer: nothing is typed into Inbox, Done or the week's review. */
+const NO_COMPOSER: View[] = ['inbox', 'done', 'review'];
 
 export default function App() {
   const { vault, error, sync, mutate } = useVault();
@@ -192,7 +214,7 @@ export default function App() {
     }
     await mutate((v) => addNote(v, { id, ...fields }));
   };
-  const [view, setView] = useState<View>('all');
+  const [view, setView] = useState<View>('today');
   const [openId, setOpenId] = useState<string | null>(null);
 
   /** Tapping the open card closes it again; before this it re-opened itself. */
@@ -256,6 +278,20 @@ export default function App() {
     setUndo(null);
   };
 
+  /** ⌘K. */
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 'k') { e.preventDefault(); setPaletteOpen((o) => !o); }
+      else if (mod && key === 'n' && !e.shiftKey) { e.preventDefault(); focusComposer(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   /** Free-text search over everything on screen. */
   const [query, setQuery] = useState('');
   const [update, setUpdate] = useState<{ version: string; install: () => Promise<void> } | null>(null);
@@ -310,8 +346,11 @@ export default function App() {
 
   const counts = useMemo(() => {
     if (!vault) return {} as Record<View, number>;
-    const live = vault.tasks.filter(isOpen);
+    const live = vault.tasks.filter(isLive);
     return {
+      today: todayTasks(live).length,
+      inbox: inboxTasks(vault.tasks).length,
+      review: weekReview(vault).finished.length,
       all: live.length,
       personal: live.filter((t) => t.project === PERSONAL).length,
       bugs: live.filter((t) => t.tags.includes('bug')).length,
@@ -334,9 +373,12 @@ export default function App() {
       return sortNotes(searchNotes(revealed ?? vault.notes, filter));
     }
 
-    const live = vault.tasks.filter(isOpen);
+    if (view === 'review') return [];
+    const live = vault.tasks.filter(isLive);
     const chosen = (() => {
       switch (view) {
+        case 'today': return todayTasks(live);
+        case 'inbox': return inboxTasks(vault.tasks);
         case 'personal': return sortTasks(live.filter((t) => t.project === PERSONAL));
         // Worst damage first, then urgency — the order someone works through
         // a bug list in, not the order the bugs arrived in.
@@ -377,6 +419,47 @@ export default function App() {
       release: g.release,
     }));
   }, [items, view, vault]);
+
+  const themeLabel = theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark';
+
+  /** Jump to a task wherever it lives, open it, and bring it into view. */
+  const openTask = (task: Task) => {
+    const where: View = task.status === 'inbox' ? 'inbox'
+      : task.status === 'done' || task.status === 'cancelled' ? 'done' : 'all';
+    setQuery('');
+    setAnswer(null);
+    setView(where);
+    setOpenId(task.id);
+    setTimeout(() => document.querySelector(`[data-task="${task.id}"]`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60);
+  };
+
+  /** Everything in Inbox joins the list at once. */
+  const keepAll = () => {
+    if (!vault) return;
+    const ids = inboxTasks(vault.tasks).map((t) => t.id);
+    void mutate((v) => ids.reduce((acc, id) => updateTask(acc, id, { status: 'todo' }), v));
+  };
+
+  const openOne = vault && openId ? vault.tasks.find((t) => t.id === openId) : undefined;
+  const commands: Command[] = [
+    { id: 'new', label: 'New task', hint: '⌘N', run: () => { if (NO_COMPOSER.includes(view)) setView('today'); setTimeout(focusComposer, 30); } },
+    ...CATEGORIES.map((c) => ({
+      id: `go-${c.view}`, label: `Go to ${c.label}`, hint: String(counts[c.view] ?? ''),
+      run: () => { setView(c.view); setOpenId(null); },
+    })),
+    ...(openOne ? [
+      openOne.scheduled === todayISO()
+        ? { id: 'unplan', label: 'Take the open task off Today', run: () => void mutate((v) => updateTask(v, openOne.id, { scheduled: undefined })) }
+        : { id: 'plan', label: 'Plan the open task for today', run: () => void mutate((v) => updateTask(v, openOne.id, { scheduled: todayISO() })) },
+      { id: 'toggle', label: openOne.status === 'done' ? 'Reopen the open task' : 'Complete the open task', run: () => void mutate((v) => toggleDone(v, openOne.id)) },
+      ...(openOne.status === 'inbox' ? [{ id: 'keep', label: 'Keep the open task', run: () => void mutate((v) => updateTask(v, openOne.id, { status: 'todo' })) }] : []),
+      { id: 'delete', label: 'Delete the open task', hint: 'undo for 8s', run: () => removeIds([openOne.id]) },
+    ] : []),
+    ...(counts.inbox ? [{ id: 'keep-all', label: `Keep everything in Inbox (${counts.inbox})`, run: keepAll }] : []),
+    { id: 'theme', label: 'Change appearance', hint: themeLabel, run: () => setTheme((t) => THEME_ORDER[(THEME_ORDER.indexOf(t) + 1) % THEME_ORDER.length]) },
+    { id: 'settings', label: 'Open Settings', run: () => setShowSettings(true) },
+  ];
 
   if (error && !vault) {
     return (
@@ -432,12 +515,12 @@ export default function App() {
   }
 
 
-  const themeLabel = theme === 'system' ? 'Auto' : theme === 'light' ? 'Light' : 'Dark';
-
   /** The open category as context for a task that does not say where it belongs. */
   const viewContext = (): ViewContext => ({
     ...(view === 'personal' ? { project: PERSONAL } : {}),
     ...(view === 'bugs' ? { tags: ['bug'] } : {}),
+    // Typed while looking at Today: you mean to do it today.
+    ...(view === 'today' ? { scheduled: todayISO() } : {}),
   });
 
   const readPicture = async (file: Blob, hint?: string) => {
@@ -465,6 +548,7 @@ export default function App() {
       ...taskFields(item),
       project: ctx.project ?? item.project,
       tags: ctx.tags ? [...new Set([...item.tags, ...ctx.tags])] : item.tags,
+      ...(ctx.scheduled ? { scheduled: ctx.scheduled } : {}),
     }), v));
     setPicture(null);
   };
@@ -510,6 +594,7 @@ export default function App() {
       ...(view === 'personal' && !local.project ? { project: PERSONAL } : {}),
       ...(view === 'bugs' && !local.tags.includes('bug')
         ? { tags: [...local.tags, 'bug'] } : {}),
+      ...(view === 'today' ? { scheduled: todayISO() } : {}),
     };
 
     // A device that can reach neither the hub's Claude nor one of its own says
@@ -668,7 +753,7 @@ export default function App() {
           ))}
         </div>
 
-        {view === 'all' && brief && !briefRead && !selecting && (
+        {view === 'today' && brief && !briefRead && !selecting && (
           <Brief
             digest={brief}
             onDismiss={() => { dismissBrief(brief.date); setBriefRead(true); }}
@@ -703,6 +788,7 @@ export default function App() {
           </button>
         )}
 
+        {view !== 'review' && (
         <div className="search-row">
           <span className="search-icon"><SearchGlyph /></span>
           <input
@@ -737,7 +823,17 @@ export default function App() {
               ×
             </button>
           )}
+          {!query && <kbd className="search-kbd" title="Commands and search">⌘K</kbd>}
         </div>
+        )}
+
+        {view === 'inbox' && items.length > 0 && !selecting && (
+          <div className="select-bar inbox-bar">
+            <span>{items.length} found in your Claude Code sessions — keep what is right</span>
+            <div style={{ flex: 1 }} />
+            <button className="btn" onClick={keepAll}>Keep all</button>
+          </div>
+        )}
 
         {answer && view !== 'notes' && (
           <Answer
@@ -763,11 +859,13 @@ export default function App() {
         )}
 
         <div className="sheet-scroll" onClick={() => { setOpenId(null); clearSelection(); }}>
-          {items.length === 0 ? (
+          {view === 'review' ? (
+            <Review vault={vault} onOpen={openTask} />
+          ) : items.length === 0 ? (
             <div className="empty">
               <div className="empty-mark">✓</div>
-              <div className="empty-title">Nothing here</div>
-              <div>Add one below.</div>
+              <div className="empty-title">{EMPTY[view]?.title ?? 'Nothing here'}</div>
+              <div>{EMPTY[view]?.body ?? 'Add one below.'}</div>
             </div>
           ) : (
             <div className="card-stack">
@@ -841,7 +939,7 @@ export default function App() {
           </div>
         )}
 
-        {view !== 'done' && (
+        {!NO_COMPOSER.includes(view) && (
           <Composer
             noun={view === 'notes' ? 'note' : 'task'}
             onAdd={add}
@@ -852,6 +950,15 @@ export default function App() {
           />
         )}
       </main>
+
+      {paletteOpen && (
+        <Palette
+          commands={commands}
+          tasks={vault.tasks}
+          onPickTask={openTask}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
 
       {update && (
         <div className="toast">
@@ -938,6 +1045,7 @@ function TaskCard({
   return (
     <div
       className="card"
+      data-task={task.id}
       data-open={open}
       data-done={done}
       data-busy={busy || undefined}
@@ -972,6 +1080,16 @@ function TaskCard({
             </div>
           ) : null}
           {task.notes && !done && <div className="card-notes">{task.notes}</div>}
+          {task.status === 'inbox' && !selecting && (
+            <div
+              className="inbox-actions"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button className="btn btn-keep" onClick={() => onPatch({ status: 'todo' })}>Keep</button>
+              <button className="btn" onClick={onDelete}>Dismiss</button>
+            </div>
+          )}
           {(task.project || task.tags.length > 0 || task.subtasks.length > 0) && !done && (
             <div className="card-meta">
               {task.project && (

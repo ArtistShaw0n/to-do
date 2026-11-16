@@ -52,6 +52,19 @@ export function NoteGlyph({ kind, size }: { kind: NoteKind; size?: number }) {
 }
 
 const VIEW_PATHS = {
+  today: (
+    <>
+      <circle cx="8" cy="8" r="2.8" />
+      <path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1" />
+    </>
+  ),
+  inbox: (
+    <>
+      <path d="M2.4 9.2l1.8-5.6h7.6l1.8 5.6v3.6H2.4z" />
+      <path d="M2.4 9.2h3.4l.8 1.6h2.8l.8-1.6h3.4" />
+    </>
+  ),
+  review: <path d="M3 13V9M6.4 13V5.6M9.8 13V7.6M13.2 13V3" />,
   all: <path d="M2.6 4.5h10.8M2.6 8h10.8M2.6 11.5h10.8" />,
   personal: (
     <>

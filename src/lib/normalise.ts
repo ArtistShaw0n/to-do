@@ -395,6 +395,8 @@ function seenIn(text: string): string | undefined {
 export interface ViewContext {
   project?: string;
   tags?: string[];
+  /** Typed while looking at Today: planned for that day. */
+  scheduled?: string;
 }
 
 /** Strip the union tag; it discriminates the parsed reply, it is not stored. */
@@ -428,6 +430,7 @@ export function applyItems(
         ...taskFields(item),
         project: view.project ?? item.project,
         tags: view.tags ? [...new Set([...item.tags, ...view.tags])] : item.tags,
+        ...(view.scheduled ? { scheduled: view.scheduled } : {}),
       };
       next = first ? updateTask(next, id, fields) : addTask(next, fields);
     } else {

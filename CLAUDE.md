@@ -280,6 +280,41 @@ How a secret gets to be encrypted, and the one place it cannot be:
 forgotten PIN means the secrets are gone and the notes remain, by design — a
 recovery path is a second key, and a second key is a second way in.
 
+### Today, the Inbox, and two kinds of date
+
+The app opens on **Today**, not on the whole list. A task is on Today for one of
+four reasons, in this order: it is overdue, it is due today, it is in progress, or
+he *planned* it for today. The rules are `todayReason` / `todayTasks` in
+`src/lib/views.ts`, held by `pnpm test:views`.
+
+That last reason is why a task has two dates, and they are not the same thing:
+
+| Field | Flag | Means |
+|---|---|---|
+| `due` | `--due X` | the deadline: late after this |
+| `scheduled` | `--scheduled X` | the day he means to *work on* it ("Do on" in the app) |
+
+A missed plan rolls forward to Today rather than vanishing; a missed deadline shows
+as overdue. When he says "aj korbo" about something due next week, that is
+`--scheduled today`, not `--due today`. A task typed into the composer while the
+Today view is open is planned for today automatically.
+
+**The Inbox** holds what the hourly importer found in his Claude Code sessions but
+he has not yet confirmed (status `inbox`). Unfinished work lands there; finished
+work goes straight to Done, because a record of what happened needs no approval.
+Inbox items stay out of Today, All, Personal and Bugs until he keeps them: **Keep**
+in the app, or `node bin/todo.mjs accept <id>`. **Dismiss** deletes, with eight
+seconds to undo. Tasks *you* add for him in a session are his own words and never
+go to the Inbox.
+
+**Week** is a review screen built from the same data: finished vs added, what is
+overdue, what has sat untouched for two weeks, and which projects the week went
+to (`weekReview`). **⌘K** opens a palette that runs any command and searches every
+title. **⌘N** jumps to the composer.
+
+Nothing deletes behind a confirm dialog any more; every delete offers Undo
+instead, because a dialog trains the hand to click Yes.
+
 ### Judgement calls
 
 - **Several tasks in one sentence → several `add` calls.** "invoice pathate hobe
@@ -368,13 +403,13 @@ asked for it.
 sync [<url> <key>]            point this machine at the hub
 sync --off                    go back to the local file only
 
-add <title>       --p 0-3  --due X  --tag a,b  --project X  --notes X
+add <title>       --p 0-3  --due X  --scheduled X  --tag a,b  --project X  --notes X
                   --sub "a,b"  --repeat daily|weekdays|weekly|biweekly|monthly
                   --raw "<his original words>"   --est <minutes>
                   --severity X --menu X --steps X --expected X
                   --env X --evidence X --reporter X      # same as `edit`
 
-start|stop|done|reopen|cancel|unblock <id...>
+start|stop|done|reopen|cancel|unblock|accept <id...>   # accept: keep an Inbox item
 block <id> "reason"
 rm <id...> [--force]          # --force required while a task is still open
 
@@ -543,6 +578,7 @@ Proving it:
 pnpm test:ai                  # a real Worker + Durable Object against a stand-in for the API
 pnpm test:writes              # TinyBase's persister vs counting storage: a wake rewrites nothing
 pnpm test:sessions            # reading session logs: offsets, what is kept, secrets scrubbed
+pnpm test:views               # Today, the Inbox and the week review: which task shows where
 node scripts/ai-smoke.mjs     # one real call per door, printed for a person to read
 node scripts/ai-eval.mjs      # his own history fed back through, to see if it lands where Claude Code did
 ```
@@ -563,6 +599,8 @@ secret, and asks the hub (`POST /ai/sessions`, `SESSIONS_SYSTEM` in
 
 The rules it keeps, each tested (`pnpm test:sessions`, and the door in `test:ai`):
 
+- **Unfinished work goes to the Inbox, not the list.** It is a suggestion until he
+  keeps it (see *Today, the Inbox…* in §2); finished work is filed as done.
 - **It adds; it never changes a task he made.** A task of his that the work seems to
   finish is reported, not closed. It may close a task *it* added in an earlier run
   (ids in its state file) — otherwise "started at ten, finished at eleven" stays open.

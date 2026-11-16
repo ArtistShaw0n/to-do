@@ -389,7 +389,8 @@ export function findTask(vault, needle) {
 }
 
 export function computeStats(vault, day = todayISO()) {
-  const open = vault.tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled');
+  // Inbox suggestions are not his work until he keeps them (same rule as src/lib/stats.ts).
+  const open = vault.tasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled' && t.status !== 'inbox');
   const overdue = open.filter((t) => t.due && t.due < day);
   const dueToday = open.filter((t) => t.due === day);
   const doing = open.filter((t) => t.status === 'doing');

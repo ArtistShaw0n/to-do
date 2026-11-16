@@ -269,6 +269,8 @@ transition('stop', 'todo');
 transition('unblock', 'todo');
 transition('cancel', 'cancelled', (t) => { t.completedAt = nowISO(); });
 transition('reopen', 'todo', (t) => { t.completedAt = undefined; });
+// A task the session importer suggested, kept: out of Inbox and onto the list.
+transition('accept', 'todo');
 
 commands.block = (positional, flags) => {
   const [needle, ...rest] = positional;
@@ -949,6 +951,7 @@ ${bold('Transitions')}
   done <id...>         complete                 reopen <id...>   un-complete
   block <id> [reason]  mark blocked             unblock <id...>
   cancel <id...>       abandon                  rm <id...> [--force]
+  accept <id...>       keep an Inbox suggestion  list --status inbox   what is waiting
 
 ${bold('Edit')}
   edit <id> [new title] [--title X] [--p N] [--due X|clear] [--project X]

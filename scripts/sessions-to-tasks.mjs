@@ -247,7 +247,10 @@ function applyAll(items, atOf = () => undefined) {
     if (item.notes) flags.notes = item.notes;
     if (item.due) flags.due = item.due;
     if (item.evidence) flags.raw = item.evidence;
-    if (item.status === 'done') flags.status = 'done';
+    // Finished work is a record and goes straight to Done. Unfinished work is a
+    // suggestion: it waits in Inbox until he keeps it, so a wrong guess never
+    // lands in the list he works from.
+    flags.status = item.status === 'done' ? 'done' : 'inbox';
     return { title: item.title, flags };
   });
   mkdirSync(STATE_DIR, { recursive: true });

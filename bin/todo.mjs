@@ -226,7 +226,14 @@ commands.import = (positional) => {
   if (!Array.isArray(entries)) die('import needs a JSON list');
   const ids = [];
   for (const e of entries) {
-    if (e.done) { commands.done([String(e.done)]); ids.push(String(e.done)); continue; }
+    // A task to close that is no longer there (dismissed or deleted meanwhile) is
+    // skipped, not fatal: one missing id must not throw away the rest of the batch.
+    if (e.done) {
+      let task = null;
+      try { task = findTask(loadVault(), String(e.done)); } catch { /* ambiguous counts as missing */ }
+      if (!task) { process.stderr.write(`skipped: no task "${e.done}" to close\n`); ids.push(null); continue; }
+      commands.done([task.id]); ids.push(task.id); continue;
+    }
     if (e.edit) { commands.edit([String(e.edit)], e.flags ?? {}); ids.push(String(e.edit)); continue; }
     ids.push(commands.add([String(e.title)], e.flags ?? {}).id);
   }

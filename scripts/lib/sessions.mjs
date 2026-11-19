@@ -207,3 +207,105 @@ function fit(lines) {
   }
   return ls.join('\n');
 }
+
+// ── Sending, so that nothing can stall it ────────────────────────────────────
+
+/**
+ * What one request to the hub may carry. `sessions` must not exceed the hub's
+ * own limit in `worker/aiRoutes.ts` (`test:sessions` checks the two agree).
+ * Bengali is three bytes a character, so size is measured both ways.
+ */
+export const BATCH = { chars: 220_000, bytes: 600_000, sessions: 60 };
+
+export function batches(sessions, limit = BATCH) {
+  const out = [];
+  let cur = [];
+  let size = 0;
+  let bytes = 0;
+  for (const s of sessions) {
+    const b = Buffer.byteLength(s.log);
+    if (cur.length && (size + s.log.length > limit.chars || bytes + b > limit.bytes || cur.length >= limit.sessions)) {
+      out.push(cur); cur = []; size = 0; bytes = 0;
+    }
+    cur.push(s);
+    size += s.log.length;
+    bytes += b;
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
+/** The hub turned the request itself down (too many, too large, malformed) — sending it again cannot help. */
+const refusedOutright = (err) => err?.status === 400 || err?.status === 413;
+
+/**
+ * Send every session, and never let one bad request stop the rest.
+ *
+ * On 17 Nov a burst of 932 hook sessions made every hourly request too big; the
+ * hub refused it, the offsets did not move, and the next hour sent the very same
+ * request — 41 hours of it. Now a refused request is halved and each half sent
+ * again, down to a single session; a single session the hub still refuses is set
+ * aside (and reported), so the rest go through and the offsets move on.
+ *
+ * Anything else — the hub unreachable, out of budget, a 5xx — is thrown: those
+ * pass on their own, and the next hour retries everything.
+ */
+export async function sendAll(sessions, send, limit = BATCH) {
+  const results = [];
+  const dropped = [];
+  const attempt = async (group) => {
+    try {
+      results.push({ group, value: await send(group) });
+    } catch (err) {
+      if (!refusedOutright(err)) throw err;
+      if (group.length === 1) { dropped.push({ session: group[0], reason: err.message }); return; }
+      const mid = Math.ceil(group.length / 2);
+      await attempt(group.slice(0, mid));
+      await attempt(group.slice(mid));
+    }
+  };
+  for (const group of batches(sessions, limit)) await attempt(group);
+  return { results, dropped };
+}
+
+// ── Saying so when it is not working ─────────────────────────────────────────
+
+const HOUR = 3600_000;
+/** How long it may fail quietly — one bad hour is usually the network — and how often to repeat the warning. */
+export const ALERT = { after: 2 * HOUR, every: 6 * HOUR };
+
+/**
+ * The import's health after one run, and what (if anything) to tell him.
+ *
+ * Silence was the other half of the 17 Nov failure: 41 failed hours were written
+ * to a log nobody reads. Two hours of failure raise a notification naming the
+ * reason, repeated every six hours while it lasts, and a recovery is announced.
+ */
+export function nextHealth(health = {}, outcome, now = Date.now()) {
+  const at = new Date(now).toISOString();
+  if (outcome.ok) {
+    const recovered = health.lastAlert
+      ? `Vault import is working again (it had stopped since ${health.failingSince}).`
+      : null;
+    return { health: { lastOk: at }, notify: recovered };
+  }
+  const failingSince = health.failingSince ?? at;
+  const next = { ...health, failingSince, lastError: outcome.error };
+  const long = now - Date.parse(failingSince) >= ALERT.after;
+  const due = !health.lastAlert || now - Date.parse(health.lastAlert) >= ALERT.every;
+  if (long && due) {
+    next.lastAlert = at;
+    return { health: next, notify: `Vault import has not worked since ${failingSince}: ${outcome.error}` };
+  }
+  return { health: next, notify: null };
+}
+
+/**
+ * Runs that are machinery, not his work:
+ * - the Vault app's own `claude -p` (the app tidying a typed line);
+ * - his Claude Code hooks, which call `claude -p` from ~/.claude/hooks to check
+ *   each action and reply. One session per check: 932 of them in a day and a
+ *   half from 17 Nov, which pushed every hourly batch past the hub's 60-session
+ *   limit and stopped the import for 41 hours.
+ */
+export const IGNORED_FOLDERS = [/com-shawon-vault-run/, /--claude-hooks$/];

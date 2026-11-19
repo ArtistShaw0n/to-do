@@ -24,7 +24,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { closeSession, loadVault, openSession, readSyncConfig } from '../bin/vault.mjs';
-import { condense, condenseParts, readNew } from './lib/sessions.mjs';
+import { IGNORED_FOLDERS, batches, condense, condenseParts, nextHealth, readNew, sendAll } from './lib/sessions.mjs';
 
 const args = process.argv.slice(2);
 const APPLY = args.includes('--apply');
@@ -44,20 +44,8 @@ const LEDGER = join(STATE_DIR, 'imported.jsonl');
 const LOCK = join(STATE_DIR, 'lock');
 const HELD = join(STATE_DIR, 'held.json');
 const MONTHLY_CAP = Number(process.env.VAULT_SESSIONS_MONTHLY_CAP) || 50;
-const BATCH_CHARS = 220_000;
 
-/**
- * Runs that are machinery, not his work:
- * - the Vault app's own `claude -p` (the app tidying a typed line);
- * - his Claude Code hooks, which call `claude -p` from ~/.claude/hooks to check
- *   each action and reply. One session per check: 932 of them in a day and a
- *   half from 17 Nov, which pushed every hourly batch past the hub's 60-session
- *   limit and stopped the import for 41 hours.
- */
-const IGNORED_FOLDERS = [/com-shawon-vault-run/, /--claude-hooks$/];
 
-/** The hub takes at most this many sessions in one request (`/ai/sessions`). */
-const BATCH_SESSIONS = 60;
 
 /** $ per million tokens, input / output. Anything unlisted is costed as Opus. */
 const PRICES = {
@@ -155,28 +143,6 @@ function collect(state, since) {
   return { sessions, next };
 }
 
-/** The hub reads at most 1 MB; Bengali is three bytes a character, so batches are measured both ways. */
-const BATCH_BYTES = 600_000;
-
-function batches(sessions) {
-  const out = [];
-  let cur = [];
-  let size = 0;
-  let bytes = 0;
-  for (const s of sessions) {
-    const b = Buffer.byteLength(s.log);
-    // A burst of sessions is split, never sent whole: one oversized batch is
-    // refused, the offsets do not move, and every later hour fails the same way.
-    if (cur.length && (size + s.log.length > BATCH_CHARS || bytes + b > BATCH_BYTES || cur.length >= BATCH_SESSIONS)) {
-      out.push(cur); cur = []; size = 0; bytes = 0;
-    }
-    cur.push(s);
-    size += s.log.length;
-    bytes += b;
-  }
-  if (cur.length) out.push(cur);
-  return out;
-}
 
 // ── Asking the hub ───────────────────────────────────────────────────────────
 
@@ -189,7 +155,11 @@ async function ask(config, payload) {
     signal: AbortSignal.timeout(300_000),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`the hub answered ${res.status} ${body.error ?? ''} ${body.detail ?? ''}`.trim());
+  if (!res.ok) {
+    const err = new Error(`the hub answered ${res.status} ${body.error ?? ''} ${body.detail ?? ''}`.trim());
+    err.status = res.status;
+    throw err;
+  }
   return { reply: JSON.parse(body.text), usage: body.usage };
 }
 
@@ -501,6 +471,31 @@ async function continueBackfill(config, state) {
   await backfill(config, state, { limit: Number(process.env.VAULT_BACKFILL_PER_RUN) || 6 });
 }
 
+// ── Health ───────────────────────────────────────────────────────────────────
+
+/** A banner on this Mac — the only way a failure here reaches him (see `nextHealth`). */
+function notify(text) {
+  log(`notified: ${text}`);
+  if (process.env.VAULT_NO_NOTIFY) return;
+  const esc = (s) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').slice(0, 220);
+  try {
+    execFileSync('osascript', ['-e', `display notification "${esc(text)}" with title "Vault"`], { stdio: 'ignore' });
+  } catch { /* no notification centre: the log still has it */ }
+}
+
+function healthy(state, warning = null) {
+  const { health, notify: say1 } = nextHealth(state.health, { ok: true });
+  state.health = health;
+  if (say1) notify(say1);
+  if (warning) notify(warning);
+}
+
+function failing(state, error) {
+  const { health, notify: say1 } = nextHealth(state.health, { ok: false, error: error.slice(0, 160) });
+  state.health = health;
+  if (say1) notify(say1);
+}
+
 // ── The run ──────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -535,7 +530,7 @@ async function main() {
     say(`Read ${sessions.length} session${sessions.length === 1 ? '' : 's'} with new work since ${since} (${readMs} ms).`);
 
     if (!sessions.length) {
-      if (APPLY) { state.files = next; writeState(state); }
+      if (APPLY) { state.files = next; healthy(state); writeState(state); }
       log(`${APPLY ? 'apply' : 'dry'}: nothing new`);
       await continueBackfill(config, state);
       return;
@@ -550,17 +545,18 @@ async function main() {
       .map((t) => ({ id: t.id, title: t.title, status: t.status, project: t.project, tags: t.tags }));
     const projects = vault.projects.map((p) => p.name);
 
-    const report = { sessions: sessions.length, chars: 0, calls: 0, cost: 0, tokens: [0, 0], accepted: [], refused: [], seen: [], silent: [] };
-    for (const group of batches(sessions)) {
-      const payload = {
-        today: dhakaDay(),
-        weekday: new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Dhaka' }),
-        projects,
-        existing,
-        sessions: group.map(({ ref, folder, title, started: s, ended, log: l }) => ({ ref, folder, title, started: s, ended, log: l })),
-      };
+    const report = { sessions: sessions.length, chars: 0, calls: 0, cost: 0, tokens: [0, 0], accepted: [], refused: [], seen: [], silent: [], dropped: [] };
+    const send = (group) => ask(config, {
+      today: dhakaDay(),
+      weekday: new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Dhaka' }),
+      projects,
+      existing,
+      sessions: group.map(({ ref, folder, title, started: s, ended, log: l }) => ({ ref, folder, title, started: s, ended, log: l })),
+    });
+    const { results, dropped } = await sendAll(sessions, send);
+    report.dropped = dropped;
+    for (const { group, value: { reply, usage } } of results) {
       report.chars += group.reduce((n, s) => n + s.log.length, 0);
-      const { reply, usage } = await ask(config, payload);
       report.calls += 1;
       report.tokens[0] += usage.inputTokens;
       report.tokens[1] += usage.outputTokens;
@@ -585,8 +581,14 @@ async function main() {
         if (item.action === 'add' && id) state.imported = [...(state.imported ?? []), id].slice(-5000);
         appendFileSync(LEDGER, `${JSON.stringify({ at: new Date().toISOString(), id, action: item.action, status: item.status, title: item.title, project: item.project, session: item.session?.file })}\n`);
       });
+      for (const d of report.dropped) {
+        appendFileSync(LEDGER, `${JSON.stringify({ at: new Date().toISOString(), skipped: true, session: d.session.file, folder: d.session.folder, reason: d.reason })}\n`);
+      }
       state.files = next;
       state.spent += report.cost;
+      healthy(state, report.dropped.length
+        ? `${report.dropped.length} session(s) the hub would not take were skipped: ${report.dropped[0].reason}`
+        : null);
       writeState(state);
     }
     await continueBackfill(config, state);
@@ -612,6 +614,10 @@ async function main() {
     log(`failed: ${err.message}`);
     console.error(err.message);
     process.exitCode = 1;
+    if (APPLY) {
+      const state = readState();
+      if (state) { failing(state, err.message); writeState(state); }
+    }
   } finally {
     try { unlinkSync(LOCK); } catch { /* gone */ }
   }

@@ -659,7 +659,17 @@ The rules it keeps, each tested (`pnpm test:sessions`, and the door in `test:ai`
   `bug` on finished work, nothing written when the hub is unreachable (the CLI
   would fall back to the local file), one run at a time, and a monthly ceiling
   (`VAULT_SESSIONS_MONTHLY_CAP`, $50).
-- The Vault app's own `claude -p` runs and subagent transcripts are skipped.
+- The Vault app's own `claude -p` runs, his hooks' `claude -p` checks (run from
+  `~/.claude/hooks`) and subagent transcripts are skipped.
+- **It cannot stall.** A request the hub turns down outright (400/413 — too many,
+  too large) is halved and sent again, down to one session; a single session it
+  still refuses is set aside and logged (`skipped` in the ledger), and the rest go
+  through. Only passing trouble — hub unreachable, out of budget, 5xx — leaves the
+  hour to be retried whole. On 17 Nov a burst of 932 hook sessions made every
+  request too big and the same refused request was sent for 41 hours.
+- **It cannot fail quietly.** Two hours of failure put a notification on the Mac
+  naming the reason, repeated every six hours while it lasts, and the recovery is
+  announced (`nextHealth`, `health` in the state file). `VAULT_NO_NOTIFY=1` mutes it.
 
 ```bash
 node scripts/sessions-to-tasks.mjs                       # dry run: what it would add, and the cost

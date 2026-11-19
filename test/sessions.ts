@@ -13,7 +13,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // @ts-expect-error — plain JS module
-import { condense, readNew, redact } from '../scripts/lib/sessions.mjs';
+import { ALERT, BATCH, IGNORED_FOLDERS, batches, condense, nextHealth, readNew, redact, sendAll } from '../scripts/lib/sessions.mjs';
 
 const results: [string, boolean, string?][] = [];
 const check = (n: string, ok: boolean, d?: string) => results.push([n, ok, d]);
@@ -91,6 +91,58 @@ const fitted = condense(many);
 check('a huge session is cut to fit, his words kept before Claude\'s', fitted.length <= 61_000 && !fitted.includes('CLAUDE:'), String(fitted.length));
 check('a session picked up mid-way carries the request it continues',
   condense([{ kind: 'claude', ts: '2026-11-12T05:00:00Z', text: 'Done.' }], { earlier: 'footer ta thik koro' }).startsWith('[earlier] USER: footer ta thik koro'));
+
+// ── Never stalled, never silent (17 Nov: 41 hours of the same refused request) ─
+
+const fake = (n: number, size = 10) => Array.from({ length: n }, (_, i) => ({ ref: `s${i}`, file: `f${i}`, folder: '/x', log: 'x'.repeat(size) }));
+
+check('a batch never carries more sessions than the hub accepts',
+  batches(fake(150)).every((g: unknown[]) => g.length <= BATCH.sessions) && batches(fake(150)).length === 3);
+
+const hubLimit = Number(/sessions\.length > (\d+)/.exec(readFileSync(join(process.cwd(), 'worker/aiRoutes.ts'), 'utf8'))?.[1]);
+check("the importer's limit is the hub's limit", hubLimit === BATCH.sessions, `hub ${hubLimit}, importer ${BATCH.sessions}`);
+
+check('his hook checks (claude -p from ~/.claude/hooks) are not read as work',
+  IGNORED_FOLDERS.some((re: RegExp) => re.test('-Users-shawon--claude-hooks'))
+  && !IGNORED_FOLDERS.some((re: RegExp) => re.test('-Users-shawon--claude')));
+
+await (async () => {
+  // The hub refuses any request holding s3, and any request of more than 4.
+  const refuse = (status: number) => Object.assign(new Error(`refused ${status}`), { status });
+  const sent: string[][] = [];
+  const send = async (group: { ref: string }[]) => {
+    if (group.length > 4) throw refuse(400);
+    if (group.some((s) => s.ref === 's3')) throw refuse(413);
+    sent.push(group.map((s) => s.ref));
+    return 'ok';
+  };
+  const { results: r, dropped } = await sendAll(fake(10), send);
+  const delivered = r.flatMap((x: { group: { ref: string }[] }) => x.group.map((s) => s.ref)).sort();
+  check('a refused request is split and sent again, not repeated', delivered.length === 9 && !delivered.includes('s3'), delivered.join(','));
+  check('…and only the one session the hub cannot take is set aside, with the reason', dropped.length === 1 && dropped[0].session.ref === 's3' && /413/.test(dropped[0].reason));
+
+  let threw = false;
+  try { await sendAll(fake(3), async () => { throw Object.assign(new Error('down'), { status: 503 }); }); } catch { threw = true; }
+  check('a passing outage (5xx, unreachable) is not mistaken for a bad request: the hour is retried whole', threw);
+})();
+
+{
+  const t0 = Date.parse('2026-11-17T12:05:00Z');
+  const h = (min: number) => t0 + min * 60_000;
+  let s = nextHealth(undefined, { ok: false, error: 'boom' }, h(0));
+  check('one failed hour stays quiet (it is usually the network)', s.notify === null && s.health.failingSince === '2026-11-17T12:05:00.000Z');
+  s = nextHealth(s.health, { ok: false, error: 'boom' }, h(60));
+  check('…a second stays quiet too', s.notify === null);
+  s = nextHealth(s.health, { ok: false, error: 'boom' }, h(ALERT.after / 60_000));
+  check('two hours of failure raise a notification naming the reason', !!s.notify && s.notify.includes('boom') && s.notify.includes('2026-11-17T12:05'));
+  const quiet = nextHealth(s.health, { ok: false, error: 'boom' }, h(180));
+  check('…not repeated every hour', quiet.notify === null);
+  const again = nextHealth(quiet.health, { ok: false, error: 'boom' }, h(120 + ALERT.every / 60_000));
+  check('…but repeated every six hours while it lasts', !!again.notify);
+  const back = nextHealth(again.health, { ok: true }, h(900));
+  check('a recovery after a warning is announced, and the record is cleared', !!back.notify && !back.health.failingSince);
+  check('a recovery nobody was warned about says nothing', nextHealth({ failingSince: '2026-11-17T12:05:00.000Z' }, { ok: true }, h(70)).notify === null);
+}
 
 rmSync(dir, { recursive: true, force: true });
 for (const [n, ok, d] of results) console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d ? `  — ${d}` : ''}`);

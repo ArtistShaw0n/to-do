@@ -46,8 +46,18 @@ const HELD = join(STATE_DIR, 'held.json');
 const MONTHLY_CAP = Number(process.env.VAULT_SESSIONS_MONTHLY_CAP) || 50;
 const BATCH_CHARS = 220_000;
 
-/** The Vault app's own `claude -p` runs: the app tidying a typed line, not his work. */
-const IGNORED_FOLDERS = [/com-shawon-vault-run/];
+/**
+ * Runs that are machinery, not his work:
+ * - the Vault app's own `claude -p` (the app tidying a typed line);
+ * - his Claude Code hooks, which call `claude -p` from ~/.claude/hooks to check
+ *   each action and reply. One session per check: 932 of them in a day and a
+ *   half from 17 Nov, which pushed every hourly batch past the hub's 60-session
+ *   limit and stopped the import for 41 hours.
+ */
+const IGNORED_FOLDERS = [/com-shawon-vault-run/, /--claude-hooks$/];
+
+/** The hub takes at most this many sessions in one request (`/ai/sessions`). */
+const BATCH_SESSIONS = 60;
 
 /** $ per million tokens, input / output. Anything unlisted is costed as Opus. */
 const PRICES = {
@@ -155,7 +165,11 @@ function batches(sessions) {
   let bytes = 0;
   for (const s of sessions) {
     const b = Buffer.byteLength(s.log);
-    if (cur.length && (size + s.log.length > BATCH_CHARS || bytes + b > BATCH_BYTES)) { out.push(cur); cur = []; size = 0; bytes = 0; }
+    // A burst of sessions is split, never sent whole: one oversized batch is
+    // refused, the offsets do not move, and every later hour fails the same way.
+    if (cur.length && (size + s.log.length > BATCH_CHARS || bytes + b > BATCH_BYTES || cur.length >= BATCH_SESSIONS)) {
+      out.push(cur); cur = []; size = 0; bytes = 0;
+    }
     cur.push(s);
     size += s.log.length;
     bytes += b;
